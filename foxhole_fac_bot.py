@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands, tasks
-from datetime import datetime, timedelta, timezone, time
+from discord.ui import View, Button
+from datetime import datetime, timezone, time
 import json
 import os
 
@@ -10,14 +11,13 @@ import os
 
 DATA_FILE = "tunnels.json"
 USER_FILE = "users.json"
+SUPPLY_INCREMENT = 1500
 
-# Intents setup (ensure enabled in Discord Developer Portal)
 intents = discord.Intents.default()
 intents.message_content = True
-intents.members = True  # Needed for Officer role checking
+intents.members = True
 bot = commands.Bot(command_prefix="/", intents=intents)
 
-# Load bot token securely from environment variable
 TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
     raise ValueError("❌ No DISCORD_TOKEN found. Please set it in your host environment variables.")
@@ -41,6 +41,76 @@ tunnels = load_data(DATA_FILE, {})
 users = load_data(USER_FILE, {})
 
 # ============================================================
+# VIEW & BUTTONS
+# ============================================================
+
+class TunnelButton(Button):
+    def __init__(self, tunnel_name):
+        super().__init__(label=f"{tunnel_name} +{SUPPLY_INCREMENT}", style=discord.ButtonStyle.green)
+        self.tunnel_name = tunnel_name
+
+    async def callback(self, interaction: discord.Interaction):
+        user_id = str(interaction.user.id)
+
+        if self.tunnel_name not in tunnels:
+            await interaction.response.send_message(f"❌ Tunnel **{self.tunnel_name}** no longer exists.", ephemeral=True)
+            return
+
+        # Update tunnel and user contribution
+        tunnels[self.tunnel_name]["total_supplies"] += SUPPLY_INCREMENT
+        users[user_id] = users.get(user_id, 0) + SUPPLY_INCREMENT
+
+        save_data(DATA_FILE, tunnels)
+        save_data(USER_FILE, users)
+
+        await interaction.response.send_message(
+            f"🪣 Added {SUPPLY_INCREMENT} supplies to **{self.tunnel_name}**!", ephemeral=True
+        )
+
+        # Update dashboard in same channel
+        await update_dashboard(interaction.channel)
+
+class TunnelDashboard(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.refresh_buttons()
+
+    def refresh_buttons(self):
+        self.clear_items()
+        for name in tunnels.keys():
+            self.add_item(TunnelButton(name))
+
+dashboard_view = TunnelDashboard()
+
+# ============================================================
+# EMBED BUILDER
+# ============================================================
+
+def build_dashboard_embed():
+    embed = discord.Embed(
+        title="🛠 Foxhole FAC Tunnels Dashboard",
+        color=0x00ff99,
+        timestamp=datetime.now(timezone.utc)
+    )
+    if not tunnels:
+        embed.description = "No tunnels available. Use `/add_tunnel` to add one."
+        return embed
+
+    for name, data in tunnels.items():
+        hours_left = data["total_supplies"] / data["usage_rate"] if data["usage_rate"] > 0 else 0
+        embed.add_field(
+            name=f"🔧 {name}",
+            value=f"Supplies: **{data['total_supplies']}**\nUsage: **{data['usage_rate']}/hr**\nDuration: **{hours_left:.1f} hrs**",
+            inline=False
+        )
+    return embed
+
+async def update_dashboard(channel: discord.TextChannel):
+    dashboard_view.refresh_buttons()
+    embed = build_dashboard_embed()
+    await channel.send(embed=embed, view=dashboard_view)
+
+# ============================================================
 # BOT EVENTS
 # ============================================================
 
@@ -49,10 +119,11 @@ async def on_ready():
     print(f"✅ Logged in as {bot.user}")
     reduce_supplies.start()
     weekly_leaderboard.start()
-    print("🕒 Tasks started successfully.")
+    bot.add_view(dashboard_view)  # Persist buttons across restarts
+    print("🕒 Tasks started and buttons restored successfully.")
 
 # ============================================================
-# BOT COMMANDS
+# COMMANDS
 # ============================================================
 
 @bot.tree.command(name="add_tunnel", description="Add a new maintenance tunnel.")
@@ -63,36 +134,31 @@ async def add_tunnel(interaction: discord.Interaction, name: str, total_supplies
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     save_data(DATA_FILE, tunnels)
-    await interaction.response.send_message(f"✅ Tunnel **{name}** added with {total_supplies} supplies and usage rate {usage_rate}/hr.")
-    await update_dashboard(interaction)
+    dashboard_view.refresh_buttons()
+    await interaction.response.send_message(f"✅ Tunnel **{name}** added successfully.")
+    await update_dashboard(interaction.channel)
 
-@bot.tree.command(name="add_supplies", description="Add supplies to a tunnel and leaderboard.")
+@bot.tree.command(name="add_supplies", description="Add supplies manually to a tunnel.")
 async def add_supplies(interaction: discord.Interaction, name: str, amount: int):
     if name not in tunnels:
         await interaction.response.send_message(f"❌ Tunnel **{name}** not found.")
         return
 
     tunnels[name]["total_supplies"] += amount
-    save_data(DATA_FILE, tunnels)
-
     user_id = str(interaction.user.id)
     users[user_id] = users.get(user_id, 0) + amount
+
+    save_data(DATA_FILE, tunnels)
     save_data(USER_FILE, users)
 
     await interaction.response.send_message(f"🪣 Added {amount} supplies to **{name}**.")
-    await update_dashboard(interaction)
+    await update_dashboard(interaction.channel)
 
-@bot.tree.command(name="dashboard", description="Show the tunnels dashboard.")
+@bot.tree.command(name="dashboard", description="Show the interactive tunnels dashboard.")
 async def dashboard(interaction: discord.Interaction):
-    embed = discord.Embed(title="🛠 Foxhole FAC Tunnels", color=0x00ff99, timestamp=datetime.now(timezone.utc))
-    for name, data in tunnels.items():
-        hours_left = data["total_supplies"] / data["usage_rate"] if data["usage_rate"] > 0 else 0
-        embed.add_field(
-            name=f"🔧 {name}",
-            value=f"Supplies: **{data['total_supplies']}**\nUsage: **{data['usage_rate']}/hr**\nDuration: **{hours_left:.1f} hrs**",
-            inline=False
-        )
-    await interaction.response.send_message(embed=embed)
+    dashboard_view.refresh_buttons()
+    embed = build_dashboard_embed()
+    await interaction.response.send_message(embed=embed, view=dashboard_view)
 
 @bot.tree.command(name="leaderboard", description="Show weekly supply contributors.")
 async def leaderboard(interaction: discord.Interaction):
@@ -130,21 +196,6 @@ async def end_of_war(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 # ============================================================
-# UTILITY FUNCTIONS
-# ============================================================
-
-async def update_dashboard(interaction: discord.Interaction):
-    embed = discord.Embed(title="🛠 Foxhole FAC Tunnels (Updated)", color=0x00ff99, timestamp=datetime.now(timezone.utc))
-    for name, data in tunnels.items():
-        hours_left = data["total_supplies"] / data["usage_rate"] if data["usage_rate"] > 0 else 0
-        embed.add_field(
-            name=f"🔧 {name}",
-            value=f"Supplies: **{data['total_supplies']}**\nUsage: **{data['usage_rate']}/hr**\nDuration: **{hours_left:.1f} hrs**",
-            inline=False
-        )
-    await interaction.channel.send(embed=embed)
-
-# ============================================================
 # TASKS
 # ============================================================
 
@@ -160,7 +211,7 @@ async def reduce_supplies():
 async def weekly_leaderboard():
     """Posts leaderboard every Sunday at 12:00 UTC."""
     now = datetime.now(timezone.utc)
-    if now.weekday() != 6:  # 6 = Sunday
+    if now.weekday() != 6:  # Sunday only
         return
 
     for guild in bot.guilds:
@@ -186,7 +237,6 @@ async def weekly_leaderboard():
         )
         await channel.send(embed=embed)
 
-    # Clear weekly contributions
     users.clear()
     save_data(USER_FILE, users)
 
