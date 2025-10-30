@@ -11,104 +11,123 @@ import os
 
 DATA_FILE = "tunnels.json"
 USER_FILE = "users.json"
+DASH_FILE = "dashboard.json"
 SUPPLY_INCREMENT = 1500
 
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
+
 bot = commands.Bot(command_prefix="/", intents=intents)
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
-    raise ValueError("❌ No DISCORD_TOKEN found. Please set it in your host environment variables.")
+    raise ValueError("❌ No DISCORD_TOKEN found in environment variables.")
 
 # ============================================================
 # DATA MANAGEMENT
 # ============================================================
 
-def load_data(file_path, default_data):
-    if os.path.exists(file_path):
-        with open(file_path, "r") as f:
+def load_data(file, default):
+    if os.path.exists(file):
+        with open(file, "r") as f:
             return json.load(f)
-    else:
-        return default_data
+    return default
 
-def save_data(file_path, data):
-    with open(file_path, "w") as f:
+def save_data(file, data):
+    with open(file, "w") as f:
         json.dump(data, f, indent=4)
 
 tunnels = load_data(DATA_FILE, {})
 users = load_data(USER_FILE, {})
+dashboard_info = load_data(DASH_FILE, {})  # {guild_id: {"channel": id, "message": id}}
 
 # ============================================================
-# VIEW & BUTTONS
+# DASHBOARD VIEW
 # ============================================================
 
 class TunnelButton(Button):
-    def __init__(self, tunnel_name):
-        super().__init__(label=f"{tunnel_name} +{SUPPLY_INCREMENT}", style=discord.ButtonStyle.green)
-        self.tunnel_name = tunnel_name
+    def __init__(self, tunnel):
+        super().__init__(
+            label=f"{tunnel} +{SUPPLY_INCREMENT}",
+            style=discord.ButtonStyle.green,
+            custom_id=f"tunnel_{tunnel.lower().replace(' ', '_')}"
+        )
+        self.tunnel = tunnel
 
     async def callback(self, interaction: discord.Interaction):
         user_id = str(interaction.user.id)
-
-        if self.tunnel_name not in tunnels:
-            await interaction.response.send_message(f"❌ Tunnel **{self.tunnel_name}** no longer exists.", ephemeral=True)
+        if self.tunnel not in tunnels:
+            await interaction.response.send_message(f"❌ Tunnel **{self.tunnel}** not found.", ephemeral=True)
             return
 
-        # Update tunnel and user contribution
-        tunnels[self.tunnel_name]["total_supplies"] += SUPPLY_INCREMENT
+        tunnels[self.tunnel]["total_supplies"] += SUPPLY_INCREMENT
         users[user_id] = users.get(user_id, 0) + SUPPLY_INCREMENT
-
         save_data(DATA_FILE, tunnels)
         save_data(USER_FILE, users)
-
         await interaction.response.send_message(
-            f"🪣 Added {SUPPLY_INCREMENT} supplies to **{self.tunnel_name}**!", ephemeral=True
+            f"🪣 Added {SUPPLY_INCREMENT} supplies to **{self.tunnel}**", ephemeral=True
         )
+        await refresh_dashboard(interaction.guild)
 
-        # Update dashboard in same channel
-        await update_dashboard(interaction.channel)
-
-class TunnelDashboard(View):
+class DashboardView(View):
     def __init__(self):
         super().__init__(timeout=None)
-        self.refresh_buttons()
+        self.rebuild()
 
-    def refresh_buttons(self):
+    def rebuild(self):
         self.clear_items()
         for name in tunnels.keys():
             self.add_item(TunnelButton(name))
 
-dashboard_view = TunnelDashboard()
 
 # ============================================================
-# EMBED BUILDER
+# EMBED BUILDERS
 # ============================================================
 
 def build_dashboard_embed():
     embed = discord.Embed(
-        title="🛠 Foxhole FAC Tunnels Dashboard",
+        title="🛠 Foxhole FAC Dashboard",
         color=0x00ff99,
         timestamp=datetime.now(timezone.utc)
     )
     if not tunnels:
-        embed.description = "No tunnels available. Use `/add_tunnel` to add one."
+        embed.description = "No tunnels added yet. Use `/addtunnel`."
         return embed
 
     for name, data in tunnels.items():
-        hours_left = data["total_supplies"] / data["usage_rate"] if data["usage_rate"] > 0 else 0
+        usage = data.get("usage_rate", 0)
+        supplies = data.get("total_supplies", 0)
+        hours_left = supplies / usage if usage > 0 else 0
+        # Round only for display — keep decimals in saved data
+        display_supplies = int(supplies)  # round down
+        display_usage = int(usage)
+        display_hours = int(hours_left)
         embed.add_field(
             name=f"🔧 {name}",
-            value=f"Supplies: **{data['total_supplies']}**\nUsage: **{data['usage_rate']}/hr**\nDuration: **{hours_left:.1f} hrs**",
-            inline=False
+           value=(
+                f"Supplies: **{display_supplies:,}**\n"
+                f"Usage: **{display_usage:,}/hr**\n"
+                f"Duration: **{display_hours} hrs**"
+           ),
+            inline=False,
         )
     return embed
 
-async def update_dashboard(channel: discord.TextChannel):
-    dashboard_view.refresh_buttons()
-    embed = build_dashboard_embed()
-    await channel.send(embed=embed, view=dashboard_view)
+async def refresh_dashboard(guild: discord.Guild):
+    """Edit the persistent dashboard message if it exists."""
+    dashboard_view.rebuild()
+    if str(guild.id) not in dashboard_info:
+        return
+    info = dashboard_info[str(guild.id)]
+    channel = guild.get_channel(info["channel"])
+    if not channel:
+        return
+    try:
+        msg = await channel.fetch_message(info["message"])
+        await msg.edit(embed=build_dashboard_embed(), view=dashboard_view)
+    except Exception:
+        pass
 
 # ============================================================
 # BOT EVENTS
@@ -116,132 +135,177 @@ async def update_dashboard(channel: discord.TextChannel):
 
 @bot.event
 async def on_ready():
+    global dashboard_view
+    if 'dashboard_view' not in globals() or dashboard_view is None:
+        dashboard_view = DashboardView()
+
+    bot.add_view(dashboard_view)
+    await bot.tree.sync()
     print(f"✅ Logged in as {bot.user}")
-    reduce_supplies.start()
     weekly_leaderboard.start()
-    bot.add_view(dashboard_view)  # Persist buttons across restarts
-    print("🕒 Tasks started and buttons restored successfully.")
+    refresh_dashboard_loop.start()
 
 # ============================================================
 # COMMANDS
 # ============================================================
 
-@bot.tree.command(name="add_tunnel", description="Add a new maintenance tunnel.")
-async def add_tunnel(interaction: discord.Interaction, name: str, total_supplies: int, usage_rate: int):
+@bot.tree.command(name="addtunnel", description="Add a new tunnel.")
+async def addtunnel(interaction: discord.Interaction, name: str, total_supplies: int, usage_rate: int):
+    await interaction.response.defer()
     tunnels[name] = {
         "total_supplies": total_supplies,
         "usage_rate": usage_rate,
-        "created_at": datetime.now(timezone.utc).isoformat()
+        "created_at": datetime.now(timezone.utc).isoformat(),
     }
     save_data(DATA_FILE, tunnels)
-    dashboard_view.refresh_buttons()
-    await interaction.response.send_message(f"✅ Tunnel **{name}** added successfully.")
-    await update_dashboard(interaction.channel)
+    dashboard_view.rebuild()
 
-@bot.tree.command(name="add_supplies", description="Add supplies manually to a tunnel.")
-async def add_supplies(interaction: discord.Interaction, name: str, amount: int):
+    guild_id = str(interaction.guild_id)
+    if guild_id not in dashboard_info:
+        # First dashboard instance: create and store it
+        msg = await interaction.followup.send(embed=build_dashboard_embed(), view=dashboard_view)
+        dashboard_info[guild_id] = {"channel": msg.channel.id, "message": msg.id}
+        save_data(DASH_FILE, dashboard_info)
+    else:
+        await refresh_dashboard(interaction.guild)
+        await interaction.followup.send(f"✅ Tunnel **{name}** added and dashboard updated.", ephemeral=True)
+
+@bot.tree.command(name="addsupplies", description="Add supplies to a tunnel and record contribution.")
+async def addsupplies(interaction: discord.Interaction, name: str, amount: int):
+    await interaction.response.defer()
     if name not in tunnels:
-        await interaction.response.send_message(f"❌ Tunnel **{name}** not found.")
+        await interaction.followup.send(f"❌ Tunnel **{name}** not found.", ephemeral=True)
         return
-
     tunnels[name]["total_supplies"] += amount
-    user_id = str(interaction.user.id)
-    users[user_id] = users.get(user_id, 0) + amount
-
+    uid = str(interaction.user.id)
+    users[uid] = users.get(uid, 0) + amount
     save_data(DATA_FILE, tunnels)
     save_data(USER_FILE, users)
+    await refresh_dashboard(interaction.guild)
+    await interaction.followup.send(f"🪣 Added {amount} supplies to **{name}**.", ephemeral=True)
 
-    await interaction.response.send_message(f"🪣 Added {amount} supplies to **{name}**.")
-    await update_dashboard(interaction.channel)
+@bot.tree.command(name="updatetunnel", description="Update tunnel values without affecting leaderboard.")
+async def updatetunnel(interaction: discord.Interaction, name: str, supplies: int = None, usage_rate: int = None):
+    await interaction.response.defer()
 
-@bot.tree.command(name="dashboard", description="Show the interactive tunnels dashboard.")
+    if name not in tunnels:
+        await interaction.followup.send(f"❌ Tunnel **{name}** not found.", ephemeral=True)
+        return
+
+    if supplies is not None:
+        tunnels[name]["total_supplies"] = supplies
+    if usage_rate is not None:
+        tunnels[name]["usage_rate"] = usage_rate
+    save_data(DATA_FILE, tunnels)
+    await refresh_dashboard(interaction.guild)
+    await interaction.followup.send(f"✅ Tunnel **{name}** updated successfully.", ephemeral=True)
+
+@bot.tree.command(name="dashboard", description="Show or bind the persistent dashboard.")
 async def dashboard(interaction: discord.Interaction):
-    dashboard_view.refresh_buttons()
-    embed = build_dashboard_embed()
-    await interaction.response.send_message(embed=embed, view=dashboard_view)
+    await interaction.response.defer()
+    gid = str(interaction.guild_id)
+    if gid in dashboard_info:
+        await refresh_dashboard(interaction.guild)
+        await interaction.followup.send("🔁 Dashboard refreshed.", ephemeral=True)
+        return
+    msg = await interaction.followup.send(embed=build_dashboard_embed(), view=dashboard_view)
+    dashboard_info[gid] = {"channel": msg.channel.id, "message": msg.id}
+    save_data(DASH_FILE, dashboard_info)
+    await interaction.followup.send("✅ Dashboard created and bound to this channel.", ephemeral=True)
 
-@bot.tree.command(name="leaderboard", description="Show weekly supply contributors.")
+@bot.tree.command(name="leaderboard", description="Show current contributors.")
 async def leaderboard(interaction: discord.Interaction):
+    await interaction.response.defer()
     if not users:
-        await interaction.response.send_message("No contributions yet!")
+        await interaction.followup.send("No contributions yet!", ephemeral=True)
         return
-
     sorted_users = sorted(users.items(), key=lambda x: x[1], reverse=True)
-    desc = ""
-    for i, (user_id, total) in enumerate(sorted_users[:10], start=1):
-        user = await bot.fetch_user(int(user_id))
-        desc += f"**{i}.** {user.display_name} — {total} supplies\n"
-
-    embed = discord.Embed(title="🏆 Weekly Contribution Leaderboard", description=desc, color=0xFFD700)
-    await interaction.response.send_message(embed=embed)
-
-@bot.tree.command(name="end_of_war", description="Officer-only: Show total usage and top 5 contributors.")
-async def end_of_war(interaction: discord.Interaction):
-    officer_role = discord.utils.get(interaction.guild.roles, name="Officer")
-    if officer_role not in interaction.user.roles:
-        await interaction.response.send_message("🚫 You do not have permission to use this command.", ephemeral=True)
-        return
-
-    total_supplies = sum(u for u in users.values())
-    top_5 = sorted(users.items(), key=lambda x: x[1], reverse=True)[:5]
     desc = "\n".join(
-        [f"**{i+1}.** {(await bot.fetch_user(int(uid))).display_name} — {amt} supplies" for i, (uid, amt) in enumerate(top_5)]
+        [f"**{i+1}.** {(await bot.fetch_user(int(uid))).display_name} — {amt} supplies" for i, (uid, amt) in enumerate(sorted_users[:10])]
     )
+    embed = discord.Embed(title="🏆 Supply Leaderboard", description=desc, color=0xFFD700)
+    await interaction.followup.send(embed=embed)
 
+@bot.tree.command(name="endwar", description="Officer-only: show totals and reset.")
+async def endwar(interaction: discord.Interaction):
+    await interaction.response.defer()
+    officer_role = discord.utils.get(interaction.guild.roles, name="Officer")
+    if not officer_role or officer_role not in interaction.user.roles:
+        await interaction.followup.send("🚫 You do not have permission to use this command.", ephemeral=True)
+        return
+    total = sum(users.values())
+    top = sorted(users.items(), key=lambda x: x[1], reverse=True)[:5]
+    desc = "\n".join(
+        [f"**{i+1}.** {(await bot.fetch_user(int(uid))).display_name} — {amt}" for i, (uid, amt) in enumerate(top)]
+    )
     embed = discord.Embed(
         title="⚔️ End of War Summary",
-        description=f"Total supplies contributed: **{total_supplies}**\n\nTop 5 Contributors:\n{desc}",
-        color=0x3498db
+        description=f"Total supplies: **{total}**\n\nTop 5:\n{desc}",
+        color=discord.Color.red(),
     )
-    await interaction.response.send_message(embed=embed)
+    await interaction.followup.send(embed=embed)
+    users.clear()
+    save_data(USER_FILE, users)
+
+@bot.tree.command(name="checkpermissions", description="Check the bot's permissions in this channel.")
+async def checkpermissions(interaction: discord.Interaction):
+    perms = interaction.channel.permissions_for(interaction.guild.me)
+    results = [
+        f"👁️ View Channel: {'✅' if perms.view_channel else '❌'}",
+        f"💬 Send Messages: {'✅' if perms.send_messages else '❌'}",
+        f"🔗 Embed Links: {'✅' if perms.embed_links else '❌'}",
+        f"📜 Read History: {'✅' if perms.read_message_history else '❌'}",
+        f"⚙️ Slash Commands: {'✅' if perms.use_application_commands else '❌'}",
+    ]
+    await interaction.response.send_message("\n".join(results), ephemeral=True)
 
 # ============================================================
 # TASKS
 # ============================================================
 
-@tasks.loop(hours=1)
-async def reduce_supplies():
-    """Reduces supplies every hour based on usage rate."""
+@tasks.loop(minutes=2)
+async def refresh_dashboard_loop():
+    """Refresh dashboard and apply light supply drain every 2 minutes."""
     for name, data in tunnels.items():
-        used = data["usage_rate"]
-        data["total_supplies"] = max(0, data["total_supplies"] - used)
+        rate = data.get("usage_rate", 0)
+        if rate > 0:
+            # Subtract usage per 2-minute tick (usage_rate per hour → divide by 30)
+            data["total_supplies"] = max(0, data["total_supplies"] - rate / 30)
+
     save_data(DATA_FILE, tunnels)
+
+    # Update all dashboards
+    for guild in bot.guilds:
+        await refresh_dashboard(guild)
 
 @tasks.loop(time=time(hour=12, tzinfo=timezone.utc))
 async def weekly_leaderboard():
-    """Posts leaderboard every Sunday at 12:00 UTC."""
     now = datetime.now(timezone.utc)
-    if now.weekday() != 6:  # Sunday only
+    if now.weekday() != 6:
         return
-
     for guild in bot.guilds:
         channel = discord.utils.get(guild.text_channels, name="logistics") or discord.utils.get(guild.text_channels, name="general")
         if not channel:
             continue
-
         if not users:
             await channel.send("📊 No contributions to report this week!")
             continue
-
         sorted_users = sorted(users.items(), key=lambda x: x[1], reverse=True)
-        desc = ""
-        for i, (user_id, total) in enumerate(sorted_users[:10], start=1):
-            user = await bot.fetch_user(int(user_id))
-            desc += f"**{i}.** {user.display_name} — {total} supplies\n"
-
+        desc = "\n".join(
+            [f"**{i+1}.** {(await bot.fetch_user(int(uid))).display_name} — {amt}" for i, (uid, amt) in enumerate(sorted_users[:10])]
+        )
         embed = discord.Embed(
             title="🏆 Weekly Contribution Leaderboard",
             description=desc,
             color=0xFFD700,
-            timestamp=now
+            timestamp=now,
         )
         await channel.send(embed=embed)
-
     users.clear()
     save_data(USER_FILE, users)
 
 # ============================================================
-# START BOT
+# START
 # ============================================================
 
 bot.run(TOKEN)
