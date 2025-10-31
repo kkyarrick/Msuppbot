@@ -215,16 +215,49 @@ async def dashboard(interaction: discord.Interaction):
 
 @bot.tree.command(name="leaderboard", description="Show current contributors.")
 async def leaderboard(interaction: discord.Interaction):
-    await interaction.response.defer()
-    if not users:
-        await interaction.followup.send("No contributions yet!", ephemeral=True)
-        return
-    sorted_users = sorted(users.items(), key=lambda x: x[1], reverse=True)
-    desc = "\n".join(
-        [f"**{i+1}.** {(await bot.fetch_user(int(uid))).display_name} — {amt} supplies" for i, (uid, amt) in enumerate(sorted_users[:10])]
-    )
-    embed = discord.Embed(title="🏆 Supply Leaderboard", description=desc, color=0xFFD700)
-    await interaction.followup.send(embed=embed)
+    try:
+        await interaction.response.defer(thinking=True)
+
+        if not users:
+            await interaction.followup.send("No contributions yet!", ephemeral=True)
+            return
+
+        sorted_users = sorted(users.items(), key=lambda x: x[1], reverse=True)
+        desc = "\n".join(
+            [
+                f"**{i+1}.** {(await bot.fetch_user(int(uid))).display_name} — {amt:,} supplies"
+                for i, (uid, amt) in enumerate(sorted_users[:10])
+            ]
+        )
+
+        embed = discord.Embed(
+            title="🏆 Supply Leaderboard",
+            description=desc or "No data.",
+            color=0xFFD700
+        )
+        await interaction.followup.send(embed=embed)
+
+    except discord.errors.NotFound:
+        # Fallback if the interaction expired or Discord rejected the defer
+        channel = interaction.channel
+        await channel.send("⚠️ Interaction expired — here's the current leaderboard:")
+
+        sorted_users = sorted(users.items(), key=lambda x: x[1], reverse=True)
+        desc = "\n".join(
+            [
+                f"**{i+1}.** {(await bot.fetch_user(int(uid))).display_name} — {amt:,} supplies"
+                for i, (uid, amt) in enumerate(sorted_users[:10])
+            ]
+        )
+        embed = discord.Embed(
+            title="🏆 Supply Leaderboard",
+            description=desc or "No data.",
+            color=0xFFD700
+        )
+        await channel.send(embed=embed)
+
+    except Exception as e:
+        await interaction.followup.send(f"⚠️ Error showing leaderboard: {e}", ephemeral=True)
 
 @bot.tree.command(name="endwar", description="Officer-only: show totals and reset.")
 async def endwar(interaction: discord.Interaction):
