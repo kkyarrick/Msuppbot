@@ -63,6 +63,34 @@ def catch_up_tunnels():
     if updated:
         save_data(DATA_FILE, tunnels)
 
+class StackSubmitModal(discord.ui.Modal, title="Submit Stacks"):
+    tunnel_name: str
+
+    def __init__(self, tunnel_name):
+        super().__init__(title=f"Submit stacks to {tunnel_name}")
+        self.tunnel_name = tunnel_name
+        self.amount = discord.ui.TextInput(
+            label="Number of stacks (100 each)",
+            placeholder="e.g., 5 for 500 supplies",
+            required=True
+        )
+        self.add_item(self.amount)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        stacks = int(self.amount.value)
+        amount = stacks * 100
+        tunnels[self.tunnel_name]["total_supplies"] += amount
+
+        user_id = str(interaction.user.id)
+        users[user_id] = users.get(user_id, 0) + amount
+        save_data(DATA_FILE, tunnels)
+        save_data(USER_FILE, users)
+
+        await refresh_dashboard(interaction.guild)
+        await interaction.response.send_message(
+            f"🪣 Submitted {amount} supplies ({stacks} stacks) to **{self.tunnel_name}**.",
+            ephemeral=True
+        )
 
 # ============================================================
 # DASHBOARD VIEW
@@ -77,20 +105,35 @@ class TunnelButton(Button):
         )
         self.tunnel = tunnel
 
-    async def callback(self, interaction: discord.Interaction):
-        user_id = str(interaction.user.id)
-        if self.tunnel not in tunnels:
-            await interaction.response.send_message(f"❌ Tunnel **{self.tunnel}** not found.", ephemeral=True)
-            return
+   async def callback(self, interaction: discord.Interaction):
+    view = discord.ui.View(timeout=30)
 
+    async def done_callback(inter: discord.Interaction):
         tunnels[self.tunnel]["total_supplies"] += SUPPLY_INCREMENT
+        user_id = str(inter.user.id)
         users[user_id] = users.get(user_id, 0) + SUPPLY_INCREMENT
         save_data(DATA_FILE, tunnels)
         save_data(USER_FILE, users)
-        await interaction.response.send_message(
-            f"🪣 Added {SUPPLY_INCREMENT} supplies to **{self.tunnel}**", ephemeral=True
+        await refresh_dashboard(inter.guild)
+        await inter.response.edit_message(
+            content=f"🪣 Added {SUPPLY_INCREMENT} supplies to **{self.tunnel}**!",
+            view=None
         )
-        await refresh_dashboard(interaction.guild)
+
+    async def stack_callback(inter: discord.Interaction):
+        modal = StackSubmitModal(self.tunnel)
+        await inter.response.send_modal(modal)
+
+    view.add_item(discord.ui.Button(label="1500 (Done)", style=discord.ButtonStyle.green))
+    view.children[0].callback = done_callback
+    view.add_item(discord.ui.Button(label="Submit Stacks (x100)", style=discord.ButtonStyle.blurple))
+    view.children[1].callback = stack_callback
+
+    await interaction.response.send_message(
+        f"How much would you like to submit to **{self.tunnel}**?",
+        ephemeral=True,
+        view=view
+    )
 
 class DashboardView(View):
     def __init__(self):
