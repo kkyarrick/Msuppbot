@@ -105,35 +105,35 @@ class TunnelButton(Button):
         )
         self.tunnel = tunnel
 
-   async def callback(self, interaction: discord.Interaction):
-    view = discord.ui.View(timeout=30)
+    async def callback(self, interaction: discord.Interaction):
+        view = discord.ui.View(timeout=30)
 
-    async def done_callback(inter: discord.Interaction):
-        tunnels[self.tunnel]["total_supplies"] += SUPPLY_INCREMENT
-        user_id = str(inter.user.id)
-        users[user_id] = users.get(user_id, 0) + SUPPLY_INCREMENT
-        save_data(DATA_FILE, tunnels)
-        save_data(USER_FILE, users)
-        await refresh_dashboard(inter.guild)
-        await inter.response.edit_message(
-            content=f"🪣 Added {SUPPLY_INCREMENT} supplies to **{self.tunnel}**!",
-            view=None
+        async def done_callback(inter: discord.Interaction):
+            tunnels[self.tunnel]["total_supplies"] += SUPPLY_INCREMENT
+            user_id = str(inter.user.id)
+            users[user_id] = users.get(user_id, 0) + SUPPLY_INCREMENT
+            save_data(DATA_FILE, tunnels)
+            save_data(USER_FILE, users)
+            await refresh_dashboard(inter.guild)
+            await inter.response.edit_message(
+                content=f"🪣 Added {SUPPLY_INCREMENT} supplies to **{self.tunnel}**!",
+                view=None
+            )
+
+        async def stack_callback(inter: discord.Interaction):
+            modal = StackSubmitModal(self.tunnel)
+            await inter.response.send_modal(modal)
+
+        view.add_item(discord.ui.Button(label="1500 (Done)", style=discord.ButtonStyle.green))
+        view.children[0].callback = done_callback
+        view.add_item(discord.ui.Button(label="Submit Stacks (x100)", style=discord.ButtonStyle.blurple))
+        view.children[1].callback = stack_callback
+
+        await interaction.response.send_message(
+            f"How much would you like to submit to **{self.tunnel}**?",
+            ephemeral=True,
+            view=view
         )
-
-    async def stack_callback(inter: discord.Interaction):
-        modal = StackSubmitModal(self.tunnel)
-        await inter.response.send_modal(modal)
-
-    view.add_item(discord.ui.Button(label="1500 (Done)", style=discord.ButtonStyle.green))
-    view.children[0].callback = done_callback
-    view.add_item(discord.ui.Button(label="Submit Stacks (x100)", style=discord.ButtonStyle.blurple))
-    view.children[1].callback = stack_callback
-
-    await interaction.response.send_message(
-        f"How much would you like to submit to **{self.tunnel}**?",
-        ephemeral=True,
-        view=view
-    )
 
 class DashboardView(View):
     def __init__(self):
