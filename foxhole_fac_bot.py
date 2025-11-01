@@ -42,6 +42,28 @@ tunnels = load_data(DATA_FILE, {})
 users = load_data(USER_FILE, {})
 dashboard_info = load_data(DASH_FILE, {})  # {guild_id: {"channel": id, "message": id}}
 
+def catch_up_tunnels():
+    now = datetime.now(timezone.utc)
+    updated = False
+
+    for name, data in tunnels.items():
+        usage = data.get("usage_rate", 0)
+        last_str = data.get("last_updated")
+        if not last_str:
+            data["last_updated"] = now.isoformat()
+            continue
+
+        last = datetime.fromisoformat(last_str)
+        hours_passed = (now - last).total_seconds() / 3600
+        if hours_passed > 0 and usage > 0:
+            data["total_supplies"] = max(0, data["total_supplies"] - (usage * hours_passed))
+            data["last_updated"] = now.isoformat()
+            updated = True
+
+    if updated:
+        save_data(DATA_FILE, tunnels)
+
+
 # ============================================================
 # DASHBOARD VIEW
 # ============================================================
@@ -103,15 +125,23 @@ def build_dashboard_embed():
         display_supplies = int(supplies)  # round down
         display_usage = int(usage)
         display_hours = int(hours_left)
+        # 🟢🟡🔴 Traffic light system
+        if hours_left >= 24:
+           status = "🟢"
+        elif hours_left >= 4:
+           status = "🟡"
+        else:
+            status = "🔴"
+
         embed.add_field(
-            name=f"🔧 {name}",
+           name=f"🔧 {name}",
            value=(
-                f"Supplies: **{display_supplies:,}**\n"
-                f"Usage: **{display_usage:,}/hr**\n"
-                f"Duration: **{display_hours} hrs**"
-           ),
-            inline=False,
-        )
+              f"Supplies: **{display_supplies:,}**\n"
+              f"Usage: **{display_usage:,}/hr**\n"
+              f"Duration: {status} **{display_hours} hrs**"
+            ),
+         inline=False,
+    )
     return embed
 
 async def refresh_dashboard(guild: discord.Guild):
@@ -138,6 +168,8 @@ async def on_ready():
     global dashboard_view
     if 'dashboard_view' not in globals() or dashboard_view is None:
         dashboard_view = DashboardView()
+
+    catch_up_tunnels()  # ✅ simulate supply loss while offline
 
     bot.add_view(dashboard_view)
     await bot.tree.sync()
