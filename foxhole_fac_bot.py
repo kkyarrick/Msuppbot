@@ -297,13 +297,19 @@ async def leaderboard(interaction: discord.Interaction):
             await interaction.followup.send("No contributions yet!", ephemeral=True)
             return
 
-        sorted_users = sorted(users.items(), key=lambda x: x[1], reverse=True)
-        desc = "\n".join(
-            [
-                f"**{i+1}.** {(await bot.fetch_user(int(uid))).display_name} — {amt:,} supplies"
-                for i, (uid, amt) in enumerate(sorted_users[:10])
-            ]
-        )
+        top = sorted(users.items(), key=lambda x: x[1], reverse=True)[:10]
+
+# Medal emojis for top 3 positions
+        medals = ["🥇", "🥈", "🥉"]
+
+        desc_lines = []
+        for i, (uid, amt) in enumerate(top):
+            user = await bot.fetch_user(int(uid))
+            medal = medals[i] if i < 3 else f"**{i+1}.**"
+            desc_lines.append(f"{medal} {user.display_name} — **{amt:,}**")
+
+        desc = "\n".join(desc_lines) or "No contributions recorded."
+
 
         embed = discord.Embed(
             title="🏆 Supply Leaderboard",
@@ -527,16 +533,26 @@ async def weekly_leaderboard():
         if not users:
             await channel.send("📊 No contributions to report this week!")
             continue
-        sorted_users = sorted(users.items(), key=lambda x: x[1], reverse=True)
-        desc = "\n".join(
-            [f"**{i+1}.** {(await bot.fetch_user(int(uid))).display_name} — {amt}" for i, (uid, amt) in enumerate(sorted_users[:10])]
-        )
+        top = sorted(users.items(), key=lambda x: x[1], reverse=True)[:10]
+
+# Medal emojis for top 3 positions
+        medals = ["🥇", "🥈", "🥉"]
+
+        desc_lines = []
+        for i, (uid, amt) in enumerate(top):
+            user = await bot.fetch_user(int(uid))
+            medal = medals[i] if i < 3 else f"**{i+1}.**"
+            desc_lines.append(f"{medal} {user.display_name} — **{amt:,}**")
+
+        desc = "\n".join(desc_lines) or "No contributions recorded."
+
         embed = discord.Embed(
             title="🏆 Weekly Contribution Leaderboard",
             description=desc,
             color=0xFFD700,
             timestamp=now,
         )
+        embed.set_footer(text=f"Updated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
         await channel.send(embed=embed)
     users.clear()
     save_data(USER_FILE, users)
