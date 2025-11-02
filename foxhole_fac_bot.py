@@ -334,26 +334,63 @@ async def leaderboard(interaction: discord.Interaction):
     except Exception as e:
         await interaction.followup.send(f"⚠️ Error showing leaderboard: {e}", ephemeral=True)
 
-@bot.tree.command(name="endwar", description="Officer-only: show totals and reset.")
-async def endwar(interaction: discord.Interaction):
-    await interaction.response.defer()
-    officer_role = discord.utils.get(interaction.guild.roles, name="Officer")
-    if not officer_role or officer_role not in interaction.user.roles:
-        await interaction.followup.send("🚫 You do not have permission to use this command.", ephemeral=True)
+@bot.tree.command(name="endwar", description="Officer-only: show totals and reset all tunnel and supply data.")
+async def endwar(inter: discord.Interaction):
+    await inter.response.defer(ephemeral=True)
+
+    # Officer-only restriction
+    officer_role = discord.utils.get(inter.guild.roles, name="Officer")
+    if not officer_role or officer_role not in inter.user.roles:
+        await inter.followup.send("🚫 You do not have permission to use this command.", ephemeral=True)
         return
-    total = sum(users.values())
-    top = sorted(users.items(), key=lambda x: x[1], reverse=True)[:5]
+
+    # Compute totals before reset
+    total_supplies = sum(users.values()) if users else 0
+    top_contributors = sorted(users.items(), key=lambda x: x[1], reverse=True)[:5]
     desc = "\n".join(
-        [f"**{i+1}.** {(await bot.fetch_user(int(uid))).display_name} — {amt}" for i, (uid, amt) in enumerate(top)]
-    )
+        [f"**{i+1}.** {(await bot.fetch_user(int(uid))).display_name} — {amt:,}" for i, (uid, amt) in enumerate(top_contributors)]
+    ) or "No contributions recorded."
+
     embed = discord.Embed(
         title="⚔️ End of War Summary",
-        description=f"Total supplies: **{total}**\n\nTop 5:\n{desc}",
+        description=f"📦 **Total supplies contributed:** {total_supplies:,}\n\n🏅 **Top 5 Contributors:**\n{desc}",
         color=discord.Color.red(),
+        timestamp=datetime.now(timezone.utc)
     )
-    await interaction.followup.send(embed=embed)
+    embed.set_footer(text=f"Reset performed by {inter.user.display_name}")
+
+    # Try to post summary to the leaderboard channel
+    guild_id = str(inter.guild_id)
+    info = dashboard_info.get(guild_id, {})
+    leaderboard_channel = None
+
+    if "leaderboard_channel" in info:
+        leaderboard_channel = inter.guild.get_channel(info["leaderboard_channel"])
+
+    # Fallback if not found
+    if not leaderboard_channel:
+        leaderboard_channel = discord.utils.get(inter.guild.text_channels, name="logistics") or \
+                              discord.utils.get(inter.guild.text_channels, name="general")
+
+    if leaderboard_channel:
+        await leaderboard_channel.send(embed=embed)
+    else:
+        await inter.followup.send(
+            "⚠️ Could not find a leaderboard or fallback channel to post the summary.",
+            ephemeral=True
+        )
+
+    # ✅ Reset all tracked data
+    tunnels.clear()
     users.clear()
+    save_data(DATA_FILE, tunnels)
     save_data(USER_FILE, users)
+
+    # Refresh dashboard to empty state
+    await refresh_dashboard(inter.guild)
+
+    # Private confirmation
+    await inter.followup.send("✅ End of War complete. Data has been wiped clean.", ephemeral=True)
 
 @bot.tree.command(name="checkpermissions", description="Check the bot's permissions in this channel.")
 async def checkpermissions(interaction: discord.Interaction):
@@ -366,6 +403,30 @@ async def checkpermissions(interaction: discord.Interaction):
         f"⚙️ Slash Commands: {'✅' if perms.use_application_commands else '❌'}",
     ]
     await interaction.response.send_message("\n".join(results), ephemeral=True)
+
+@bot.tree.command(name="setleaderboardchannel", description="Set the channel where weekly leaderboards will be posted.")
+async def setleaderboardchannel(inter: discord.Interaction, channel: discord.TextChannel):
+    # Defer early to prevent "Unknown interaction" timeout
+    await inter.response.defer(ephemeral=True)
+
+    # Officer-only restriction
+    officer_role = discord.utils.get(inter.guild.roles, name="Officer")
+    if not officer_role or officer_role not in inter.user.roles:
+        await inter.followup.send("🚫 You do not have permission to use this command.", ephemeral=True)
+        return
+
+    gid = str(inter.guild_id)
+
+    if gid not in dashboard_info:
+        dashboard_info[gid] = {}
+
+    dashboard_info[gid]["leaderboard_channel"] = channel.id
+    save_data(DASH_FILE, dashboard_info)
+
+    await inter.followup.send(
+        f"✅ Weekly leaderboard channel set to {channel.mention}.",
+        ephemeral=True
+    )
 
 # ============================================================
 # TASKS
@@ -392,7 +453,18 @@ async def weekly_leaderboard():
     if now.weekday() != 6:
         return
     for guild in bot.guilds:
-        channel = discord.utils.get(guild.text_channels, name="logistics") or discord.utils.get(guild.text_channels, name="general")
+        info = dashboard_info.get(str(guild.id), {})
+        channel = None
+
+# Check if custom channel is set
+        if "leaderboard_channel" in info:
+             channel = guild.get_channel(info["leaderboard_channel"])
+
+# Fallback if not set or missing
+        if not channel:
+             channel = discord.utils.get(guild.text_channels, name="logistics") or \
+                   discord.utils.get(guild.text_channels, name="general")
+
         if not channel:
             continue
         if not users:
