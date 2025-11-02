@@ -427,6 +427,63 @@ async def setleaderboardchannel(inter: discord.Interaction, channel: discord.Tex
         f"✅ Weekly leaderboard channel set to {channel.mention}.",
         ephemeral=True
     )
+@bot.tree.command(name="help", description="Show all available Foxhole FAC commands.")
+async def help_command(inter: discord.Interaction):
+    embed = discord.Embed(
+        title="🛠️ Foxhole FAC Bot Commands",
+        description="A full list of available commands and their uses.",
+        color=discord.Color.blue()
+    )
+
+    embed.add_field(
+        name="📦 Tunnel Management",
+        value=(
+            "**/addtunnel** — Add a new tunnel with total supplies and usage rate.\n"
+            "**/addsupplies** — Add a specific amount of supplies to a tunnel.\n"
+            "**/updatetunnel** — Update tunnel values (no leaderboard impact).\n"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="📊 Dashboard & Info",
+        value=(
+            "**/dashboard** — Display or refresh the dashboard.\n"
+            "**/checkpermissions** — Check bot permissions in this channel.\n"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="🏅 Leaderboards",
+        value=(
+            "**/leaderboard** — Show the current top contributors.\n"
+            "📅 **Weekly Leaderboard** — Auto-posts every Sunday 12:00 UTC.\n"
+            "**/setleaderboardchannel** *(Officer only)* — Choose where leaderboards and end-of-war summaries post.\n"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="⚔️ War Management",
+        value=(
+            "**/endwar** *(Officer only)* — Post end-of-war summary, wipe all tunnel & supply data.\n"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="🔁 Automatic Systems",
+        value=(
+            "• Dashboard refreshes every 2 minutes.\n"
+            "• Supply depletion continues accurately after restarts.\n"
+            "• Dashboard buttons: **1500 (Done)** or **Submit Stacks (x100)**.\n"
+        ),
+        inline=False
+    )
+
+    embed.set_footer(text="Use /help anytime for a quick reference.")
+    await inter.response.send_message(embed=embed, ephemeral=True)
 
 # ============================================================
 # TASKS
