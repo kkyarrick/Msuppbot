@@ -318,9 +318,6 @@ async def updatetunnel(interaction: discord.Interaction, name: str, supplies: in
     if location is not None:
         tunnels[name]["location"] = location
     save_data(DATA_FILE, tunnels)
-    
-    await log_action(interaction.guild, f"{interaction.user.display_name} updated **{name}** "
-                                   f"({total_supplies:,} supplies, {usage_rate}/hr) — Location: {location}.")
 
     await refresh_dashboard(interaction.guild)
     await interaction.followup.send(f"✅ Tunnel **{name}** updated successfully.", ephemeral=True)
