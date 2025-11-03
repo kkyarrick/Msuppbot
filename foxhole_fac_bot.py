@@ -284,7 +284,7 @@ async def addtunnel(interaction: discord.Interaction, name: str, total_supplies:
         save_data(DASH_FILE, dashboard_info)
     else:
         await log_action(interaction.guild, f"{interaction.user.display_name} added new tunnel **{name}** "
-                              f"({total_supplies:,} supplies, {usage_rate}/hr) — Location: {location}.")
+                              f"({"total_supplies":,} supplies, {"usage_rate"}/hr) — Location: {"location"}.")
         await refresh_dashboard(interaction.guild)
         await interaction.followup.send(f"✅ Tunnel **{name}** added and dashboard updated.", ephemeral=True)
 
