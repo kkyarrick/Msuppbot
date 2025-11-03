@@ -63,6 +63,41 @@ def catch_up_tunnels():
     if updated:
         save_data(DATA_FILE, tunnels)
 
+# ============================================================
+# DATA LOGGING
+# ============================================================
+
+async def log_action(guild: discord.Guild, message: str):
+    """Posts log messages to the FAC log thread for auditing."""
+    try:
+        guild_id = str(guild.id)
+        log_channel_id = dashboard_info.get(guild_id, {}).get("log_channel")
+
+        if not log_channel_id:
+            return  # Logging not configured yet
+
+        log_channel = guild.get_channel(log_channel_id)
+        if not log_channel:
+            return
+
+        # Look for a thread named "FAC Logs"
+        thread = discord.utils.get(log_channel.threads, name="FAC Logs")
+
+        # Create the thread if it doesn’t exist
+        if not thread:
+            thread = await log_channel.create_thread(
+                name="FAC Logs",
+                type=discord.ChannelType.public_thread
+            )
+            await thread.send("🧾 **FAC Audit Log Thread Created** — all actions will be recorded here.")
+
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        await thread.send(f"🕒 `{timestamp}` — {message}")
+
+    except Exception as e:
+        print(f"[LOGGING ERROR] {e}")
+
+
 class StackSubmitModal(discord.ui.Modal, title="Submit Stacks"):
     tunnel_name: str
 
@@ -91,38 +126,6 @@ class StackSubmitModal(discord.ui.Modal, title="Submit Stacks"):
             f"🪣 Submitted {amount} supplies ({stacks} stacks) to **{self.tunnel_name}**.",
             ephemeral=True
         )
-
-# ============================================================
-# DATA LOGGING
-# ============================================================
-
-    async def log_action(guild: discord.Guild, message: str):
-        """Posts log messages to the FAC log thread for auditing."""
-        try:
-            guild_id = str(guild.id)
-            log_channel_id = dashboard_info.get(guild_id, {}).get("log_channel")
-
-            if not log_channel_id:
-                return  # Logging not configured yet
-
-            log_channel = guild.get_channel(log_channel_id)
-            if not log_channel:
-                return
-
-            # Look for a thread named "FAC Logs"
-            thread = discord.utils.get(log_channel.threads, name="FAC Logs")
-
-            # Create the thread if it doesn’t exist
-            if not thread:
-                thread = await log_channel.create_thread(name="FAC Logs", type=discord.ChannelType.public_thread)
-                await thread.send("🧾 **FAC Audit Log Thread Created** — all actions will be recorded here.")
-
-            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-            await thread.send(f"🕒 `{timestamp}` — {message}")
-
-        except Exception as e:
-            print(f"[LOGGING ERROR] {e}")
-
 
 # ============================================================
 # DASHBOARD VIEW
