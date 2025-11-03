@@ -93,6 +93,38 @@ class StackSubmitModal(discord.ui.Modal, title="Submit Stacks"):
         )
 
 # ============================================================
+# DATA LOGGING
+# ============================================================
+
+    async def log_action(guild: discord.Guild, message: str):
+        """Posts log messages to the FAC log thread for auditing."""
+        try:
+            guild_id = str(guild.id)
+            log_channel_id = dashboard_info.get(guild_id, {}).get("log_channel")
+
+            if not log_channel_id:
+                return  # Logging not configured yet
+
+            log_channel = guild.get_channel(log_channel_id)
+            if not log_channel:
+                return
+
+            # Look for a thread named "FAC Logs"
+            thread = discord.utils.get(log_channel.threads, name="FAC Logs")
+
+            # Create the thread if it doesn’t exist
+            if not thread:
+                thread = await log_channel.create_thread(name="FAC Logs", type=discord.ChannelType.public_thread)
+                await thread.send("🧾 **FAC Audit Log Thread Created** — all actions will be recorded here.")
+
+            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+            await thread.send(f"🕒 `{timestamp}` — {message}")
+
+        except Exception as e:
+            print(f"[LOGGING ERROR] {e}")
+
+
+# ============================================================
 # DASHBOARD VIEW
 # ============================================================
 
@@ -168,6 +200,11 @@ def build_dashboard_embed():
         display_supplies = int(supplies)  # round down
         display_usage = int(usage)
         display_hours = int(hours_left)
+
+        # Hoverable ? symbol for location
+        location_info = data.get("location", "Unknown location")
+        hover_symbol = f"[❔](https://dummy.link '{location_info}')"
+        
         # 🟢🟡🔴 Traffic light system
         if hours_left >= 24:
            status = "🟢"
@@ -230,6 +267,7 @@ async def addtunnel(interaction: discord.Interaction, name: str, total_supplies:
     tunnels[name] = {
         "total_supplies": total_supplies,
         "usage_rate": usage_rate,
+        "location": location,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     save_data(DATA_FILE, tunnels)
@@ -260,7 +298,7 @@ async def addsupplies(interaction: discord.Interaction, name: str, amount: int):
     await interaction.followup.send(f"🪣 Added {amount} supplies to **{name}**.", ephemeral=True)
 
 @bot.tree.command(name="updatetunnel", description="Update tunnel values without affecting leaderboard.")
-async def updatetunnel(interaction: discord.Interaction, name: str, supplies: int = None, usage_rate: int = None):
+async def updatetunnel(interaction: discord.Interaction, name: str, supplies: int = None, usage_rate: int = None, location: int = None):
     await interaction.response.defer()
 
     if name not in tunnels:
@@ -271,6 +309,9 @@ async def updatetunnel(interaction: discord.Interaction, name: str, supplies: in
         tunnels[name]["total_supplies"] = supplies
     if usage_rate is not None:
         tunnels[name]["usage_rate"] = usage_rate
+    if location:
+        tunnels[name]["location"] = location
+    
     save_data(DATA_FILE, tunnels)
     await refresh_dashboard(interaction.guild)
     await interaction.followup.send(f"✅ Tunnel **{name}** updated successfully.", ephemeral=True)
