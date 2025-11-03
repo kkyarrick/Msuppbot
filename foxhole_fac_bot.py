@@ -256,6 +256,7 @@ async def on_ready():
 
     bot.add_view(dashboard_view)
     await bot.tree.sync()
+    print(f"🔁 Synced slash commands for {len(bot.tree.get_commands())} commands.")
     print(f"✅ Logged in as {bot.user}")
     weekly_leaderboard.start()
     refresh_dashboard_loop.start()
@@ -290,36 +291,64 @@ async def addtunnel(interaction: discord.Interaction, name: str, total_supplies:
 
 @bot.tree.command(name="addsupplies", description="Add supplies to a tunnel and record contribution.")
 async def addsupplies(interaction: discord.Interaction, name: str, amount: int):
-    await interaction.response.defer()
+    await interaction.response.defer(ephemeral=True)
+
     if name not in tunnels:
         await interaction.followup.send(f"❌ Tunnel **{name}** not found.", ephemeral=True)
         return
+
     tunnels[name]["total_supplies"] += amount
     uid = str(interaction.user.id)
     users[uid] = users.get(uid, 0) + amount
+
     save_data(DATA_FILE, tunnels)
     save_data(USER_FILE, users)
-    await log_action(inter.guild, f"{inter.user.display_name} added {amount:,} supplies to **{tunnel_name}**.")
     await refresh_dashboard(interaction.guild)
-    await interaction.followup.send(f"🪣 Added {amount} supplies to **{name}**.", ephemeral=True)
+
+    # ✅ Correct logging call
+    await log_action(
+        interaction.guild,
+        f"{interaction.user.display_name} added {amount:,} supplies to **{name}**."
+    )
+
+    await interaction.followup.send(f"🪣 Added {amount:,} supplies to **{name}**.", ephemeral=True)
 
 @bot.tree.command(name="updatetunnel", description="Update tunnel values without affecting leaderboard.")
-async def updatetunnel(interaction: discord.Interaction, name: str, supplies: int = None, usage_rate: int = None, location: str = None):
-    await interaction.response.defer()
+async def updatetunnel(
+    interaction: discord.Interaction,
+    name: str,
+    supplies: int = None,
+    usage_rate: int = None,
+    location: str = None
+):
+    await interaction.response.defer(ephemeral=True)
 
     if name not in tunnels:
         await interaction.followup.send(f"❌ Tunnel **{name}** not found.", ephemeral=True)
         return
 
+    # Update only provided fields
     if supplies is not None:
         tunnels[name]["total_supplies"] = supplies
     if usage_rate is not None:
         tunnels[name]["usage_rate"] = usage_rate
     if location is not None:
         tunnels[name]["location"] = location
-    save_data(DATA_FILE, tunnels)
 
+    # Read back safe values
+    total_supplies = tunnels[name].get("total_supplies", 0)
+    current_rate   = tunnels[name].get("usage_rate", 0)
+    current_loc    = tunnels[name].get("location", "Unknown")
+
+    save_data(DATA_FILE, tunnels)
     await refresh_dashboard(interaction.guild)
+
+    await log_action(
+        interaction.guild,
+        f"{interaction.user.display_name} updated **{name}** "
+        f"({current_loc}) → {total_supplies:,} supplies @ {current_rate}/hr."
+    )
+
     await interaction.followup.send(f"✅ Tunnel **{name}** updated successfully.", ephemeral=True)
 
 @bot.tree.command(name="dashboard", description="Show or bind the persistent dashboard.")
