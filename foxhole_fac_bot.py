@@ -280,6 +280,8 @@ async def addtunnel(interaction: discord.Interaction, name: str, total_supplies:
         dashboard_info[guild_id] = {"channel": msg.channel.id, "message": msg.id}
         save_data(DASH_FILE, dashboard_info)
     else:
+        await log_action(inter.guild, f"{inter.user.display_name} added new tunnel **{name}** "
+                              f"({total_supplies:,} supplies, {usage_rate}/hr) — Location: {location}.")
         await refresh_dashboard(interaction.guild)
         await interaction.followup.send(f"✅ Tunnel **{name}** added and dashboard updated.", ephemeral=True)
 
@@ -294,6 +296,7 @@ async def addsupplies(interaction: discord.Interaction, name: str, amount: int):
     users[uid] = users.get(uid, 0) + amount
     save_data(DATA_FILE, tunnels)
     save_data(USER_FILE, users)
+    await log_action(inter.guild, f"{inter.user.display_name} added {amount:,} supplies to **{tunnel_name}**.")
     await refresh_dashboard(interaction.guild)
     await interaction.followup.send(f"🪣 Added {amount} supplies to **{name}**.", ephemeral=True)
 
@@ -311,6 +314,9 @@ async def updatetunnel(interaction: discord.Interaction, name: str, supplies: in
         tunnels[name]["usage_rate"] = usage_rate
     if location:
         tunnels[name]["location"] = location
+
+    await log_action(inter.guild, f"{inter.user.display_name} updated **{tunnel_name}** "
+                              f"to {supplies:,} supplies, {usage_rate}/hr (correction).")
     
     save_data(DATA_FILE, tunnels)
     await refresh_dashboard(interaction.guild)
@@ -436,6 +442,8 @@ async def endwar(inter: discord.Interaction):
     # Refresh dashboard to empty state
     await refresh_dashboard(inter.guild)
 
+    await log_action(inter.guild, f"{inter.user.display_name} executed `/endwar` — data wiped and summary posted.")
+
     # Private confirmation
     await inter.followup.send("✅ End of War complete. Data has been wiped clean.", ephemeral=True)
 
@@ -474,6 +482,25 @@ async def setleaderboardchannel(inter: discord.Interaction, channel: discord.Tex
         f"✅ Weekly leaderboard channel set to {channel.mention}.",
         ephemeral=True
     )
+    
+@bot.tree.command(name="setlogchannel", description="Officer-only: Set the channel where FAC logs will be posted.")
+async def setlogchannel(inter: discord.Interaction, channel: discord.TextChannel):
+    await inter.response.defer(ephemeral=True)
+
+    officer_role = discord.utils.get(inter.guild.roles, name="Officer")
+    if not officer_role or officer_role not in inter.user.roles:
+        await inter.followup.send("🚫 You do not have permission to use this command.", ephemeral=True)
+        return
+
+    guild_id = str(inter.guild.id)
+    if guild_id not in dashboard_info:
+        dashboard_info[guild_id] = {}
+
+    dashboard_info[guild_id]["log_channel"] = channel.id
+    save_data(DASH_FILE, dashboard_info)
+
+    await inter.followup.send(f"✅ FAC logs will now post to {channel.mention}.", ephemeral=True)
+
 @bot.tree.command(name="help", description="Show all available Foxhole FAC commands.")
 async def help_command(inter: discord.Interaction):
     embed = discord.Embed(
