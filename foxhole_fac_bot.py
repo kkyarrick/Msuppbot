@@ -262,7 +262,7 @@ async def on_ready():
 # ============================================================
 
 @bot.tree.command(name="addtunnel", description="Add a new tunnel.")
-async def addtunnel(interaction: discord.Interaction, name: str, total_supplies: int, usage_rate: int):
+async def addtunnel(interaction: discord.Interaction, name: str, total_supplies: int, usage_rate: int, location; str = "Unknown"):
     await interaction.response.defer()
     tunnels[name] = {
         "total_supplies": total_supplies,
@@ -301,7 +301,7 @@ async def addsupplies(interaction: discord.Interaction, name: str, amount: int):
     await interaction.followup.send(f"🪣 Added {amount} supplies to **{name}**.", ephemeral=True)
 
 @bot.tree.command(name="updatetunnel", description="Update tunnel values without affecting leaderboard.")
-async def updatetunnel(interaction: discord.Interaction, name: str, supplies: int = None, usage_rate: int = None, location: int = None):
+async def updatetunnel(interaction: discord.Interaction, name: str, supplies: int = None, usage_rate: int = None, location: str = None):
     await interaction.response.defer()
 
     if name not in tunnels:
