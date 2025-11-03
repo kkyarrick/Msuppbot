@@ -318,7 +318,7 @@ async def updatetunnel(interaction: discord.Interaction, name: str, supplies: in
     if location:
         tunnels[name]["location"] = location
 
-    await log_action(interaction.guild, f"{interaction.user.display_name} updated **{tunnel_name}** "
+    await log_action(interaction.guild, f"{interaction.user.display_name} updated **{name}** "
                                    f"to {supplies:,} supplies @ {usage_rate}/hr.")
 
     save_data(DATA_FILE, tunnels)
