@@ -315,7 +315,7 @@ async def updatetunnel(interaction: discord.Interaction, name: str, supplies: in
         tunnels[name]["total_supplies"] = supplies
     if usage_rate is not None:
         tunnels[name]["usage_rate"] = usage_rate
-    if location:
+    if location is not None:
         tunnels[name]["location"] = location
 
     await log_action(interaction.guild, f"{interaction.user.display_name} updated **{name}** "
