@@ -218,7 +218,7 @@ def build_dashboard_embed():
         return embed
 
     # Column headers
-    header = f"{'Tunnel':<18}{'Supplies':>10}{'Usage/hr':>12}{'Status':>10}"
+    header = f"{'Tunnel'}{'Supplies':>10}{'Usage/hr':>12}{'Status':>10}"
     rows = [header, "─" * 52]
 
     for name, data in tunnels.items():
