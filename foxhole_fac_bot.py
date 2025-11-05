@@ -246,19 +246,31 @@ def build_dashboard_embed():
     return embed
 
 async def refresh_dashboard(guild: discord.Guild):
-    """Edit the persistent dashboard message if it exists."""
+    """Edit or recreate the persistent dashboard message if it exists."""
     dashboard_view.rebuild()
-    if str(guild.id) not in dashboard_info:
-        return
-    info = dashboard_info[str(guild.id)]
-    channel = guild.get_channel(info["channel"])
+
+    gid = str(guild.id)
+    info = dashboard_info.get(gid)
+    if not info:
+        return  # No dashboard set yet
+
+    channel = guild.get_channel(info.get("channel"))
     if not channel:
-        return
+        return  # Channel deleted or missing
+
     try:
-        msg = await channel.fetch_message(info["message"])
+        msg = await channel.fetch_message(info.get("message"))
         await msg.edit(embed=build_dashboard_embed(), view=dashboard_view)
-    except Exception:
-        pass
+    except discord.NotFound:
+        # 🧱 Dashboard message was deleted — recreate it
+        new_msg = await channel.send(embed=build_dashboard_embed(), view=dashboard_view)
+        dashboard_info[gid]["channel"] = channel.id
+        dashboard_info[gid]["message"] = new_msg.id
+        save_data(DASH_FILE, dashboard_info)
+        print(f"[INFO] Dashboard message was missing — recreated in {channel.name}.")
+    except Exception as e:
+        print(f"[ERROR] Failed to refresh dashboard in {guild.name}: {e}")
+
 
 # ============================================================
 # ORDER DASHBOARD VIEW
@@ -328,26 +340,35 @@ def build_order_dashboard():
 # Refresh Order Dashboard
 # ------------------------------------------------------------
 async def refresh_order_dashboard(guild: discord.Guild):
-    """Updates the dashboard message if it exists."""
-    if str(guild.id) not in dashboard_info:
-        return
+    """Updates or recreates the order dashboard message if needed."""
+    gid = str(guild.id)
+    info = dashboard_info.get(gid, {})
 
-    info = dashboard_info[str(guild.id)]
     channel_id = info.get("orders_channel")
     message_id = info.get("orders_message")
 
     if not channel_id or not message_id:
+        print(f"[INFO] No order dashboard data found for guild {guild.name}.")
         return
 
     channel = guild.get_channel(channel_id)
     if not channel:
+        print(f"[WARN] Orders channel missing for guild {guild.name}.")
         return
 
     try:
         msg = await channel.fetch_message(message_id)
-        await msg.edit(embed=build_order_dashboard(), view=OrderDashboardView())
+        await msg.edit(embed=build_clickable_order_dashboard(), view=OrderDashboardView())
+        print(f"[OK] Refreshed order dashboard for {guild.name}.")
+    except discord.NotFound:
+        # The message was deleted — recreate it
+        new_msg = await channel.send(embed=build_clickable_order_dashboard(), view=OrderDashboardView())
+        dashboard_info[gid]["orders_channel"] = channel.id
+        dashboard_info[gid]["orders_message"] = new_msg.id
+        save_data(DASH_FILE, dashboard_info)
+        print(f"[INFO] Recreated order dashboard in {channel.name}.")
     except Exception as e:
-        print(f"[WARN] Could not update order dashboard: {e}")
+        print(f"[ERROR] Failed to refresh order dashboard in {guild.name}: {e}")
 
 # ------------------------------------------------------------
 # Command to Create or Refresh Dashboard
