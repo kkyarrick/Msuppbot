@@ -194,16 +194,16 @@ class TunnelButton(Button):
 class DashboardView(View):
     def __init__(self):
         super().__init__(timeout=None)
-        self.re()
+        self.rebuild()
 
-    def re(self):
+    def rebuild(self):
         self.clear_items()
         for name in tunnels.keys():
             self.add_item(TunnelButton(name))
 
 
 # ============================================================
-# EMBED ERS
+# EMBED BUILDERS
 # ============================================================
 
 def build_dashboard_embed():
