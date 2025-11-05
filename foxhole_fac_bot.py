@@ -599,9 +599,15 @@ async def orders(inter: discord.Interaction):
 
     view = OrderDashboardView()
     embed = build_clickable_order_dashboard()
+    msg = await inter.followup.send(embed=embed, view=view)
 
-    await inter.followup.send(embed=embed, view=view)
+    guild_id = str(inter.guild_id)
+    if guild_id not in dashboard_info:
+        dashboard_info[guild_id] = {}
 
+    dashboard_info[guild_id]["orders_channel"] = msg.channel.id
+    dashboard_info[guild_id]["orders_message"] = msg.id
+    save_data(DASH_FILE, dashboard_info)
 
 # ------------------------------------------------------------
 # Command: /order_manage — Open interactive controls for one order
