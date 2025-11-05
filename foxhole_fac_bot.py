@@ -241,7 +241,7 @@ def build_dashboard_embed():
         row = f"{hover_symbol} **{name}** | {supplies:,} | {usage}/hr | {status} {hours_left}h"
         rows.append(row)
         
-    embed.description = f"{header}\n" + "\n".join(rows)
+    embed.description = f"```{'\\n'.join(rows)}```"
     embed.set_footer(text="🕒 Updated automatically every 2 minutes.")
     return embed
 
