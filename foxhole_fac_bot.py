@@ -217,8 +217,9 @@ def build_dashboard_embed():
         embed.description = "No tunnels added yet. Use `/addtunnel`."
         return embed
 
-    header = "**Tunnel | Supplies | Usage/hr | Duration**\n━━━━━━━━━━━━━━━━━━━"
-    rows = []
+    # Header for readability (❔ has no label)
+    header = f"{'':<3}{'Tunnel':<16}{'Supplies':>10}{'Usage/hr':>12}{'Status':>10}"
+    rows = [header, "─" * 55]
 
     for name, data in tunnels.items():
         usage = int(data.get("usage_rate", 0))
@@ -226,7 +227,7 @@ def build_dashboard_embed():
         location_info = data.get("location", "Unknown location")
         hours_left = int(supplies / usage) if usage > 0 else 0
 
-        # Traffic light system
+        # 🟢🟡🔴 Traffic light
         if hours_left >= 24:
             status = "🟢"
         elif hours_left >= 4:
@@ -234,15 +235,21 @@ def build_dashboard_embed():
         else:
             status = "🔴"
 
-        # Hoverable ? symbol for location
+        # Hoverable ❔ link as separate column
         hover_symbol = f"[❔](https://dummy.link '{location_info}')"
 
-        # Format the row
-        row = f"{hover_symbol} **{name}** | {supplies:,} | {usage}/hr | {status} {hours_left}h"
-        rows.append(row)
-        
+        line = (
+            f"{hover_symbol:<3}"  # dedicated hover column
+            f"{name:<16}"
+            f"{supplies:>10,}"
+            f"{usage:>10}/hr"
+            f"{status:>8} {hours_left:>3}h"
+        )
+        rows.append(line)
+
+    # Wrap in code block for alignment
     embed.description = f"```{'\\n'.join(rows)}```"
-    embed.set_footer(text="🕒 Updated automatically every 2 minutes.")
+    embed.set_footer(text="🕒 Updated every 2 minutes.")
     return embed
 
 async def refresh_dashboard(guild: discord.Guild):
