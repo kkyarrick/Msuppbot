@@ -237,7 +237,7 @@ def build_dashboard_embed():
 
         hover_symbol = f"[❔](https://dummy.link '{location_info}')"
         line = f"{hover_symbol} {name:<16}{supplies:>10,}{usage:>10}/hr{status:>8} {hours_left}h"
-        rows.append(line)
+        rows.append(row)
 
     # Use a monospaced code block for alignment
     embed.description = f"```{'\\n'.join(rows)}```"
