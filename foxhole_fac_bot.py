@@ -410,13 +410,15 @@ class SingleOrderView(discord.ui.View):
 
     @discord.ui.button(label="Claim", style=discord.ButtonStyle.blurple)
     async def claim_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+
         if not has_authorized_role(interaction.user):
-            await interaction.response.send_message("🚫 Unauthorized.", ephemeral=True)
+            await interaction.followup.send("🚫 Unauthorized.", ephemeral=True)
             return
 
         order = orders_data["orders"].get(self.order_id)
         if not order:
-            await interaction.response.send_message(f"❌ Order #{self.order_id} not found.", ephemeral=True)
+            await interaction.followup.send(f"❌ Order #{self.order_id} not found.", ephemeral=True)
             return
 
         order["claimed_by"] = str(interaction.user.id)
@@ -426,10 +428,11 @@ class SingleOrderView(discord.ui.View):
 
         await log_action(interaction.guild, f"{interaction.user.display_name} claimed order **#{self.order_id}** ({order['item']} x{order['quantity']}).")
         await refresh_order_dashboard(interaction.guild)
-        await interaction.response.send_message(f"🛠 Order **#{self.order_id}** claimed successfully.", ephemeral=True)
+        await interaction.followup.send(f"🛠 Order **#{self.order_id}** claimed successfully.", ephemeral=True)
 
     @discord.ui.button(label="Update Status", style=discord.ButtonStyle.green)
     async def update_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Do NOT defer here because we'll open a modal
         if not has_authorized_role(interaction.user):
             await interaction.response.send_message("🚫 Unauthorized.", ephemeral=True)
             return
@@ -438,13 +441,15 @@ class SingleOrderView(discord.ui.View):
 
     @discord.ui.button(label="Mark Complete", style=discord.ButtonStyle.gray)
     async def complete_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+
         if not has_authorized_role(interaction.user):
-            await interaction.response.send_message("🚫 Unauthorized.", ephemeral=True)
+            await interaction.followup.send("🚫 Unauthorized.", ephemeral=True)
             return
 
         order = orders_data["orders"].get(self.order_id)
         if not order:
-            await interaction.response.send_message(f"❌ Order #{self.order_id} not found.", ephemeral=True)
+            await interaction.followup.send(f"❌ Order #{self.order_id} not found.", ephemeral=True)
             return
 
         order["status"] = "Complete"
@@ -453,17 +458,19 @@ class SingleOrderView(discord.ui.View):
 
         await log_action(interaction.guild, f"{interaction.user.display_name} marked order **#{self.order_id}** complete.")
         await refresh_order_dashboard(interaction.guild)
-        await interaction.response.send_message(f"✅ Order **#{self.order_id}** marked complete.", ephemeral=True)
+        await interaction.followup.send(f"✅ Order **#{self.order_id}** marked complete.", ephemeral=True)
 
     @discord.ui.button(label="Delete", style=discord.ButtonStyle.red)
     async def delete_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+
         officer_role = discord.utils.get(interaction.guild.roles, name="Officer")
         if not officer_role or officer_role not in interaction.user.roles:
-            await interaction.response.send_message("🚫 Only Officers can delete orders.", ephemeral=True)
+            await interaction.followup.send("🚫 Only Officers can delete orders.", ephemeral=True)
             return
 
         if self.order_id not in orders_data["orders"]:
-            await interaction.response.send_message(f"❌ Order #{self.order_id} not found.", ephemeral=True)
+            await interaction.followup.send(f"❌ Order #{self.order_id} not found.", ephemeral=True)
             return
 
         deleted = orders_data["orders"].pop(self.order_id)
@@ -471,7 +478,7 @@ class SingleOrderView(discord.ui.View):
 
         await log_action(interaction.guild, f"{interaction.user.display_name} deleted order **#{self.order_id}** ({deleted['item']} x{deleted['quantity']}).")
         await refresh_order_dashboard(interaction.guild)
-        await interaction.response.send_message(f"🗑️ Order **#{self.order_id}** deleted.", ephemeral=True)
+        await interaction.followup.send(f"🗑️ Order **#{self.order_id}** deleted.", ephemeral=True)
 
 # ------------------------------------------------------------
 # Command: /order_manage — Open interactive controls for one order
