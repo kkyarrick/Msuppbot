@@ -240,6 +240,268 @@ async def refresh_dashboard(guild: discord.Guild):
         pass
 
 # ============================================================
+# ORDER DASHBOARD VIEW
+# ============================================================
+
+class OrderActionView(discord.ui.View):
+    """Interactive buttons for managing a specific order."""
+    def __init__(self, order_id: str):
+        super().__init__(timeout=60)
+        self.order_id = order_id
+
+        self.add_item(discord.ui.Button(label="Claim", style=discord.ButtonStyle.blurple, custom_id=f"claim_{order_id}"))
+        self.add_item(discord.ui.Button(label="Update", style=discord.ButtonStyle.green, custom_id=f"update_{order_id}"))
+        self.add_item(discord.ui.Button(label="Complete", style=discord.ButtonStyle.gray, custom_id=f"complete_{order_id}"))
+        self.add_item(discord.ui.Button(label="Delete", style=discord.ButtonStyle.red, custom_id=f"delete_{order_id}"))
+
+    async def interaction_check(self, interaction: discord.Interaction):
+        if not has_authorized_role(interaction.user):
+            await interaction.response.send_message("🚫 You are not authorized for order management.", ephemeral=True)
+            return False
+        return True
+
+    async def on_error(self, error, item, interaction):
+        print(f"[ERROR] Dashboard button failed: {error}")
+        await interaction.response.send_message("⚠️ An error occurred while processing that action.", ephemeral=True)
+
+# ------------------------------------------------------------
+# Dashboard Builder
+# ------------------------------------------------------------
+def build_order_dashboard():
+    """Build the dashboard embed summarizing all current orders."""
+    embed = discord.Embed(
+        title="📦 Foxhole FAC Orders Dashboard",
+        color=discord.Color.blurple(),
+        timestamp=datetime.now(timezone.utc)
+    )
+
+    if not orders_data["orders"]:
+        embed.description = "No active orders. Use `/order_create` to start a new one."
+        return embed
+
+    header = "**ID | Item | Qty | Status | Priority | Claimed By**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    lines = []
+
+    for oid, o in orders_data["orders"].items():
+        status = o["status"]
+        priority = o.get("priority", "Normal")
+        item = o["item"]
+        qty = o["quantity"]
+        claimed = "-"
+        if o.get("claimed_by"):
+            try:
+                claimed_user = bot.get_user(int(o["claimed_by"])) or f"<@{o['claimed_by']}>"
+                claimed = claimed_user.display_name if hasattr(claimed_user, "display_name") else claimed_user
+            except Exception:
+                claimed = "Unknown"
+
+        # Add colored emoji for priority
+        priority_icon = {"High": "🔴", "Normal": "🟡", "Low": "🟢"}.get(priority, "🟢")
+        lines.append(f"**#{oid}** | {item} | {qty} | {status} | {priority_icon} {priority} | {claimed}")
+
+    embed.description = f"{header}\n" + "\n".join(lines)
+    embed.set_footer(text="🔁 Updated automatically every 2 minutes.")
+    return embed
+
+# ------------------------------------------------------------
+# Refresh Order Dashboard
+# ------------------------------------------------------------
+async def refresh_order_dashboard(guild: discord.Guild):
+    """Updates the dashboard message if it exists."""
+    if str(guild.id) not in dashboard_info:
+        return
+
+    info = dashboard_info[str(guild.id)]
+    order_channel_id = info.get("order_channel")
+    order_message_id = info.get("order_message")
+
+    if not order_channel_id or not order_message_id:
+        return
+
+    channel = guild.get_channel(order_channel_id)
+    if not channel:
+        return
+
+    try:
+        msg = await channel.fetch_message(order_message_id)
+        await msg.edit(embed=build_order_dashboard(), view=None)
+    except Exception as e:
+        print(f"[WARN] Could not update order dashboard: {e}")
+
+# ------------------------------------------------------------
+# Command to Create or Refresh Dashboard
+# ------------------------------------------------------------
+@bot.tree.command(name="order_dashboard", description="Show or bind the order management dashboard.")
+async def order_dashboard(inter: discord.Interaction):
+    await inter.response.defer()
+
+    guild_id = str(inter.guild_id)
+    embed = build_order_dashboard()
+
+    if guild_id in dashboard_info and "order_message" in dashboard_info[guild_id]:
+        await refresh_order_dashboard(inter.guild)
+        await inter.followup.send("🔁 Order dashboard refreshed.", ephemeral=True)
+        return
+
+    msg = await inter.followup.send(embed=embed)
+    dashboard_info[guild_id]["order_channel"] = msg.channel.id
+    dashboard_info[guild_id]["order_message"] = msg.id
+    save_data(DASH_FILE, dashboard_info)
+
+    await inter.followup.send("✅ Order dashboard created and bound to this channel.", ephemeral=True)
+
+# ------------------------------------------------------------
+# Background Task: Refresh Every 2 Minutes
+# ------------------------------------------------------------
+@tasks.loop(minutes=2)
+async def refresh_order_dashboard_loop():
+    for guild in bot.guilds:
+        await refresh_order_dashboard(guild)
+
+# ============================================================
+# INTERACTIVE ORDER DASHBOARD (CLICKABLE)
+# ============================================================
+
+class OrderStatusModal(discord.ui.Modal, title="Update Order Status"):
+    def __init__(self, order_id: str):
+        super().__init__(title=f"Update Order #{order_id}")
+        self.order_id = order_id
+        self.status_input = discord.ui.TextInput(
+            label="New Status",
+            placeholder="e.g. In Progress, Ready for Collection, Complete",
+            required=True
+        )
+        self.add_item(self.status_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        order_id = self.order_id
+        new_status = self.status_input.value.strip()
+
+        valid_statuses = [
+            "Order Placed", "Order Claimed", "Order Started",
+            "In Progress", "Ready for Collection", "Complete"
+        ]
+        if new_status not in valid_statuses:
+            await interaction.response.send_message(
+                f"⚠️ Invalid status. Choose one of: {', '.join(valid_statuses)}",
+                ephemeral=True
+            )
+            return
+
+        order = orders_data["orders"].get(order_id)
+        if not order:
+            await interaction.response.send_message(f"❌ Order #{order_id} not found.", ephemeral=True)
+            return
+
+        order["status"] = new_status
+        order["timestamps"]["last_update"] = datetime.now(timezone.utc).isoformat()
+        save_orders()
+
+        await log_action(interaction.guild, f"{interaction.user.display_name} updated order **#{order_id}** → **{new_status}**.")
+        await refresh_order_dashboard(interaction.guild)
+        await interaction.response.send_message(f"✅ Order **#{order_id}** updated to **{new_status}**.", ephemeral=True)
+
+
+class SingleOrderView(discord.ui.View):
+    """Interactive buttons for a single order."""
+    def __init__(self, order_id: str):
+        super().__init__(timeout=60)
+        self.order_id = order_id
+
+    @discord.ui.button(label="Claim", style=discord.ButtonStyle.blurple)
+    async def claim_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not has_authorized_role(interaction.user):
+            await interaction.response.send_message("🚫 Unauthorized.", ephemeral=True)
+            return
+
+        order = orders_data["orders"].get(self.order_id)
+        if not order:
+            await interaction.response.send_message(f"❌ Order #{self.order_id} not found.", ephemeral=True)
+            return
+
+        order["claimed_by"] = str(interaction.user.id)
+        order["status"] = "Order Claimed"
+        order["timestamps"]["claimed"] = datetime.now(timezone.utc).isoformat()
+        save_orders()
+
+        await log_action(interaction.guild, f"{interaction.user.display_name} claimed order **#{self.order_id}** ({order['item']} x{order['quantity']}).")
+        await refresh_order_dashboard(interaction.guild)
+        await interaction.response.send_message(f"🛠 Order **#{self.order_id}** claimed successfully.", ephemeral=True)
+
+    @discord.ui.button(label="Update Status", style=discord.ButtonStyle.green)
+    async def update_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not has_authorized_role(interaction.user):
+            await interaction.response.send_message("🚫 Unauthorized.", ephemeral=True)
+            return
+        modal = OrderStatusModal(self.order_id)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="Mark Complete", style=discord.ButtonStyle.gray)
+    async def complete_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not has_authorized_role(interaction.user):
+            await interaction.response.send_message("🚫 Unauthorized.", ephemeral=True)
+            return
+
+        order = orders_data["orders"].get(self.order_id)
+        if not order:
+            await interaction.response.send_message(f"❌ Order #{self.order_id} not found.", ephemeral=True)
+            return
+
+        order["status"] = "Complete"
+        order["timestamps"]["completed"] = datetime.now(timezone.utc).isoformat()
+        save_orders()
+
+        await log_action(interaction.guild, f"{interaction.user.display_name} marked order **#{self.order_id}** complete.")
+        await refresh_order_dashboard(interaction.guild)
+        await interaction.response.send_message(f"✅ Order **#{self.order_id}** marked complete.", ephemeral=True)
+
+    @discord.ui.button(label="Delete", style=discord.ButtonStyle.red)
+    async def delete_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        officer_role = discord.utils.get(interaction.guild.roles, name="Officer")
+        if not officer_role or officer_role not in interaction.user.roles:
+            await interaction.response.send_message("🚫 Only Officers can delete orders.", ephemeral=True)
+            return
+
+        if self.order_id not in orders_data["orders"]:
+            await interaction.response.send_message(f"❌ Order #{self.order_id} not found.", ephemeral=True)
+            return
+
+        deleted = orders_data["orders"].pop(self.order_id)
+        save_orders()
+
+        await log_action(interaction.guild, f"{interaction.user.display_name} deleted order **#{self.order_id}** ({deleted['item']} x{deleted['quantity']}).")
+        await refresh_order_dashboard(interaction.guild)
+        await interaction.response.send_message(f"🗑️ Order **#{self.order_id}** deleted.", ephemeral=True)
+
+# ------------------------------------------------------------
+# Command: /order_manage — Open interactive controls for one order
+# ------------------------------------------------------------
+@bot.tree.command(name="order_manage", description="Open an interactive view to manage a specific order.")
+async def order_manage(inter: discord.Interaction, order_id: int):
+    await inter.response.defer(ephemeral=True)
+
+    order_id = str(order_id)
+    order = orders_data["orders"].get(order_id)
+    if not order:
+        await inter.followup.send(f"❌ Order **#{order_id}** not found.", ephemeral=True)
+        return
+
+    embed = discord.Embed(
+        title=f"🧾 Order #{order_id}: {order['item']} x{order['quantity']}",
+        color=discord.Color.blurple(),
+        description=(
+            f"**Priority:** {order['priority']}\n"
+            f"**Status:** {order['status']}\n"
+            f"**Requested by:** <@{order['requested_by']}>\n"
+            f"**Claimed by:** {('<@' + order['claimed_by'] + '>') if order['claimed_by'] else '—'}"
+        ),
+        timestamp=datetime.now(timezone.utc)
+    )
+
+    await inter.followup.send(embed=embed, view=SingleOrderView(order_id), ephemeral=True)
+
+
+# ============================================================
 # BOT EVENTS
 # ============================================================
 
