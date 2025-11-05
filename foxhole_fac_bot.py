@@ -12,6 +12,7 @@ import os
 DATA_FILE = "tunnels.json"
 USER_FILE = "users.json"
 DASH_FILE = "dashboard.json"
+ORDERS_FILE = "orders.json"
 SUPPLY_INCREMENT = 1500
 
 intents = discord.Intents.default()
@@ -23,6 +24,15 @@ bot = commands.Bot(command_prefix="/", intents=intents)
 TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
     raise ValueError("❌ No DISCORD_TOKEN found in environment variables.")
+
+for file, default in [
+    (DATA_FILE, {}),
+    (USER_FILE, {}),
+    (DASH_FILE, {}),
+    (ORDERS_FILE, {"next_id": 1, "orders": {}})
+]:
+    if not os.path.exists(file):
+        save_data(file, default)
 
 # ============================================================
 # DATA MANAGEMENT
@@ -37,6 +47,17 @@ def load_data(file, default):
 def save_data(file, data):
     with open(file, "w") as f:
         json.dump(data, f, indent=4)
+
+def load_orders():
+    if os.path.exists(ORDERS_FILE):
+        with open(ORDERS_FILE, "r") as f:
+            try:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+            except json.JSONDecodeError:
+                pass
+    return {"next_id": 1, "orders": {}}
 
 tunnels = load_data(DATA_FILE, {})
 users = load_data(USER_FILE, {})
@@ -300,7 +321,7 @@ def build_order_dashboard():
         lines.append(f"**#{oid}** | {item} | {qty} | {status} | {priority_icon} {priority} | {claimed}")
 
     embed.description = f"{header}\n" + "\n".join(lines)
-    embed.set_footer(text="🔁 Updated automatically every 2 minutes.")
+    embed.set_footer(text="🔁 Updated automatically every 5 minutes.")
     return embed
 
 # ------------------------------------------------------------
@@ -315,16 +336,16 @@ async def refresh_order_dashboard(guild: discord.Guild):
     channel_id = info.get("orders_channel")
     message_id = info.get("orders_message")
 
-    if not order_channel_id or not order_message_id:
+    if not channel_id or not message_id:
         return
 
-    channel = guild.get_channel(order_channel_id)
+    channel = guild.get_channel(channel_id)
     if not channel:
         return
 
     try:
-        msg = await channel.fetch_message(order_message_id)
-        await msg.edit(embed=build_order_dashboard(), view=None)
+        msg = await channel.fetch_message(message_id)
+        await msg.edit(embed=build_order_dashboard(), view=OrderDashboardView())
     except Exception as e:
         print(f"[WARN] Could not update order dashboard: {e}")
 
@@ -646,10 +667,9 @@ async def on_ready():
     global dashboard_view
     if 'dashboard_view' not in globals() or dashboard_view is None:
         dashboard_view = DashboardView()
-
     catch_up_tunnels()  # ✅ simulate supply loss while offline
-
     bot.add_view(dashboard_view)
+    bot.add_view(OrderDashboardView())
     await bot.tree.sync()
     print(f"🔁 Synced slash commands for {len(bot.tree.get_commands())} commands.")
     print(f"✅ Logged in as {bot.user}")
@@ -1012,8 +1032,6 @@ async def help_command(inter: discord.Interaction):
 # ============================================================
 # ORDERS SYSTEM
 # ============================================================
-
-ORDERS_FILE = "orders.json"
 
 def load_orders():
     if os.path.exists(ORDERS_FILE):
