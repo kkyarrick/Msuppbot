@@ -218,7 +218,7 @@ def build_dashboard_embed():
         return embed
 
     header = "**Tunnel | Supplies | Usage/hr | Duration**\n━━━━━━━━━━━━━━━━━━━"
-    rows = []
+    rows = [header, "─" * 52]
 
     for name, data in tunnels.items():
         usage = int(data.get("usage_rate", 0))
@@ -240,7 +240,8 @@ def build_dashboard_embed():
         # Format the row
         row = f"{hover_symbol} **{name}** | {supplies:,} | {usage}/hr | {status} {hours_left}h"
         rows.append(row)
-
+        
+    embed.description = f"```{'\\n'.join(rows)}```"
     embed.description = f"{header}\n" + "\n".join(rows)
     embed.set_footer(text="🕒 Updated automatically every 2 minutes.")
     return embed
