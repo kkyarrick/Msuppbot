@@ -312,8 +312,8 @@ async def refresh_order_dashboard(guild: discord.Guild):
         return
 
     info = dashboard_info[str(guild.id)]
-    order_channel_id = info.get("order_channel")
-    order_message_id = info.get("order_message")
+    channel_id = info.get("orders_channel")
+    message_id = info.get("orders_message")
 
     if not order_channel_id or not order_message_id:
         return
