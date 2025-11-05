@@ -217,8 +217,9 @@ def build_dashboard_embed():
         embed.description = "No tunnels added yet. Use `/addtunnel`."
         return embed
 
-    header = "**Tunnel | Supplies | Usage/hr | Duration**\n━━━━━━━━━━━━━━━━━━━"
-    rows = []
+    # Column headers
+    header = f"{'Tunnel':<18}{'Supplies':>10}{'Usage/hr':>12}{'Status':>10}"
+    rows = [header, "─" * 52]
 
     for name, data in tunnels.items():
         usage = int(data.get("usage_rate", 0))
@@ -238,9 +239,11 @@ def build_dashboard_embed():
         hover_symbol = f"[❔](https://dummy.link '{location_info}')"
 
         # Format the row
-        row = f"{hover_symbol} **{name}** | {supplies:,} | {usage}/hr | {status} {hours_left}h"
-        rows.append(row)
-
+        line = f"{hover_symbol} {name:<16}{supplies:>10,}{usage:>10}/hr{status:>8} {hours_left}h"
+        rows.append(line)
+        
+   # Use a monospaced code block for alignment
+    embed.description = f"```{'\\n'.join(rows)}```"
     embed.description = f"{header}\n" + "\n".join(rows)
     embed.set_footer(text="🕒 Updated automatically every 2 minutes.")
     return embed
@@ -312,8 +315,8 @@ def build_order_dashboard():
         embed.description = "No active orders. Use `/order_create` to start a new one."
         return embed
 
-    header = "**ID | Item | Qty | Status | Priority | Claimed By**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    lines = []
+    header = f"{'ID':<5}{'Item':<20}{'Qty':>6}{'Status':>18}{'Priority':>12}{'Claimed By':>16}"
+    rows = [header, "─" * 80]
 
     for oid, o in orders_data["orders"].items():
         status = o["status"]
@@ -330,9 +333,10 @@ def build_order_dashboard():
 
         # Add colored emoji for priority
         priority_icon = {"High": "🔴", "Normal": "🟡", "Low": "🟢"}.get(priority, "🟢")
-        lines.append(f"**#{oid}** | {item} | {qty} | {status} | {priority_icon} {priority} | {claimed}")
-
-    embed.description = f"{header}\n" + "\n".join(lines)
+        line = f"#{oid:<4}{item:<20}{qty:>6}{status:>18}{priority_icon} {priority:>10}{claimed:>16}"
+        rows.append(line)
+        
+    embed.description = f"```{'\\n'.join(rows)}```"
     embed.set_footer(text="🔁 Updated automatically every 5 minutes.")
     return embed
 
