@@ -210,37 +210,61 @@ def build_dashboard_embed():
     embed = discord.Embed(
         title="🛠 Foxhole FAC Dashboard",
         color=0x00ff99,
-        timestamp=datetime.now(timezone.utc)
+        timestamp=datetime.now(timezone.utc),
     )
 
     if not tunnels:
         embed.description = "No tunnels added yet. Use `/addtunnel`."
         return embed
 
-    lines = ["**Tunnel | Supplies | Usage/hr | Duration**", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"]
+    # ---- helpers -----------------------------------------------------------
+    def trunc(text: str, width: int) -> str:
+        """Truncate text with ellipsis if too long."""
+        return text if len(text) <= width else text[: max(0, width - 1)] + "…"
 
+    # Build rows first
+    raw_rows = []
     for name, data in tunnels.items():
-        usage = int(data.get("usage_rate", 0))
         supplies = int(data.get("total_supplies", 0))
-        location_info = data.get("location", "Unknown location")
-        hours_left = int(supplies / usage) if usage > 0 else 0
+        usage    = int(data.get("usage_rate", 0))
+        loc      = str(data.get("location", "Unknown"))
+        hours    = int(supplies / usage) if usage > 0 else 0
+        status   = "🟢" if hours >= 24 else "🟡" if hours >= 4 else "🔴"
+        raw_rows.append((name, supplies, usage, status, hours, loc))
 
-        if hours_left >= 24:
-            status = "🟢"
-        elif hours_left >= 4:
-            status = "🟡"
-        else:
-            status = "🔴"
+    # Dynamic column widths (capped)
+    NAME_CAP = 18
+    LOC_CAP  = 18
+    name_w = min(max(6, max(len(n) for n, *_ in raw_rows)), NAME_CAP)
+    loc_w  = min(max(6, max(len(l) for *_, l in raw_rows)), LOC_CAP)
+    sup_w  = 10   # Supplies width
+    use_w  = 8    # Usage width
 
-        hover_symbol = f"[❔](https://dummy.link '{location_info}')"
+    # Header + separator
+    header = (
+        f"{'Tunnel':<{name_w}}  "
+        f"{'Supplies':>{sup_w}}  "
+        f"{'Usage/hr':>{use_w}}  "
+        f"{'Status':>8}  "
+        f"{'Location':<{loc_w}}"
+    )
+    sep = "─" * len(header)
+
+    # Format rows
+    lines = [header, sep]
+    for name, supplies, usage, status, hours, loc in raw_rows:
+        name = trunc(name, name_w)
+        loc  = trunc(loc,  loc_w)
         line = (
-            f"{hover_symbol} **{name}** | "
-            f"📦 {supplies:,} | ⚙️ {usage}/hr | "
-            f"{status} {hours_left} hrs"
+            f"{name:<{name_w}}  "
+            f"{supplies:>{sup_w},}  "
+            f"{usage:>{use_w}}/hr  "
+            f"{status} {hours:>3}h  "
+            f"{loc:<{loc_w}}"
         )
         lines.append(line)
 
-    embed.description = "\n".join(lines)
+    embed.description = f"```{chr(10).join(lines)}```"
     embed.set_footer(text="🕒 Updated every 2 minutes.")
     return embed
 
