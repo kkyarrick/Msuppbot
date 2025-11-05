@@ -217,17 +217,16 @@ def build_dashboard_embed():
         embed.description = "No tunnels added yet. Use `/addtunnel`."
         return embed
 
-    # Column headers
-    header = f"{'Tunnel'}{'Supplies':>10}{'Usage/hr':>12}{'Status':>10}"
-    rows = [header, "─" * 52]
+    header = "**Tunnel | Supplies | Usage/hr | Duration**\n━━━━━━━━━━━━━━━━━━━"
+    rows = []
 
     for name, data in tunnels.items():
         usage = int(data.get("usage_rate", 0))
         supplies = int(data.get("total_supplies", 0))
-        location_info = data.get("location", "Unknown")
+        location_info = data.get("location", "Unknown location")
         hours_left = int(supplies / usage) if usage > 0 else 0
 
-        # Status light
+        # Traffic light system
         if hours_left >= 24:
             status = "🟢"
         elif hours_left >= 4:
@@ -235,13 +234,15 @@ def build_dashboard_embed():
         else:
             status = "🔴"
 
+        # Hoverable ? symbol for location
         hover_symbol = f"[❔](https://dummy.link '{location_info}')"
-        line = f"{hover_symbol} {name:<16}{supplies:>10,}{usage:>10}/hr{status:>8} {hours_left}h"
+
+        # Format the row
+        row = f"{hover_symbol} **{name}** | {supplies:,} | {usage}/hr | {status} {hours_left}h"
         rows.append(row)
 
-    # Use a monospaced code block for alignment
-    embed.description = f"```{'\\n'.join(rows)}```"
-    embed.set_footer(text="🕒  Updated automatically every 2 minutes.")
+    embed.description = f"{header}\n" + "\n".join(rows)
+    embed.set_footer(text="🕒 Updated automatically every 2 minutes.")
     return embed
 
 async def refresh_dashboard(guild: discord.Guild):
@@ -311,8 +312,8 @@ def build_order_dashboard():
         embed.description = "No active orders. Use `/order_create` to start a new one."
         return embed
 
-    header = f"{'ID':<5}{'Item':<20}{'Qty':>6}{'Status':>18}{'Priority':>12}{'Claimed By':>16}"
-    rows = [header, "─" * 80]
+    header = "**ID | Item | Qty | Status | Priority | Claimed By**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    lines = []
 
     for oid, o in orders_data["orders"].items():
         status = o["status"]
@@ -329,10 +330,9 @@ def build_order_dashboard():
 
         # Add colored emoji for priority
         priority_icon = {"High": "🔴", "Normal": "🟡", "Low": "🟢"}.get(priority, "🟢")
-        line = f"#{oid:<4}{item:<20}{qty:>6}{status:>18}{priority_icon} {priority:>10}{claimed:>16}"
-        rows.append(line)
-        
-    embed.description = f"```{'\\n'.join(rows)}```"
+        lines.append(f"**#{oid}** | {item} | {qty} | {status} | {priority_icon} {priority} | {claimed}")
+
+    embed.description = f"{header}\n" + "\n".join(lines)
     embed.set_footer(text="🔁 Updated automatically every 5 minutes.")
     return embed
 
