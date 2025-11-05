@@ -350,13 +350,41 @@ async def order_dashboard(inter: discord.Interaction):
 
     await inter.followup.send("✅ Order dashboard created and bound to this channel.", ephemeral=True)
 
-# ------------------------------------------------------------
-# Background Task: Refresh Every 2 Minutes
-# ------------------------------------------------------------
-@tasks.loop(minutes=2)
-async def refresh_order_dashboard_loop():
+# ============================================================
+# AUTO-REFRESH ORDERS DASHBOARD (every 5 minutes)
+# ============================================================
+
+@tasks.loop(minutes=5)
+async def refresh_orders_loop():
+    """Refresh the interactive orders dashboard every 5 minutes."""
     for guild in bot.guilds:
-        await refresh_order_dashboard(guild)
+        # Look up where the dashboard was last posted
+        info = dashboard_info.get(str(guild.id), {})
+        channel_id = info.get("orders_channel")
+        message_id = info.get("orders_message")
+
+        if not channel_id or not message_id:
+            continue  # nothing to refresh yet
+
+        channel = guild.get_channel(channel_id)
+        if not channel:
+            continue
+
+        try:
+            msg = await channel.fetch_message(message_id)
+            view = OrderDashboardView()
+            embed = build_clickable_order_dashboard()
+            await msg.edit(embed=embed, view=view)
+        except discord.NotFound:
+            # Dashboard message no longer exists
+            continue
+        except Exception as e:
+            print(f"[ORDER DASHBOARD REFRESH ERROR] {e}")
+
+
+@refresh_orders_loop.before_loop
+async def before_refresh_orders_loop():
+    await bot.wait_until_ready()
 
 # ============================================================
 # INTERACTIVE ORDER DASHBOARD (CLICKABLE)
@@ -480,6 +508,101 @@ class SingleOrderView(discord.ui.View):
         await refresh_order_dashboard(interaction.guild)
         await interaction.followup.send(f"🗑️ Order **#{self.order_id}** deleted.", ephemeral=True)
 
+# ============================================================
+# CLICKABLE ORDER DASHBOARD
+# ============================================================
+
+class OrderButton(discord.ui.Button):
+    """Button representing a single order in the dashboard."""
+    def __init__(self, order_id: str, label: str):
+        super().__init__(label=label, style=discord.ButtonStyle.gray, custom_id=f"order_{order_id}")
+        self.order_id = order_id
+
+    async def callback(self, interaction: discord.Interaction):
+        """When an order button is clicked, show detailed interactive view."""
+        order = orders_data["orders"].get(self.order_id)
+        if not order:
+            await interaction.response.send_message(f"❌ Order **#{self.order_id}** not found.", ephemeral=True)
+            return
+
+        embed = discord.Embed(
+            title=f"🧾 Order #{self.order_id}: {order['item']} x{order['quantity']}",
+            color=discord.Color.blurple(),
+            description=(
+                f"**Priority:** {order['priority']}\n"
+                f"**Status:** {order['status']}\n"
+                f"**Requested by:** <@{order['requested_by']}>\n"
+                f"**Claimed by:** {('<@' + order['claimed_by'] + '>') if order['claimed_by'] else '—'}"
+            ),
+            timestamp=datetime.now(timezone.utc)
+        )
+
+        await interaction.response.send_message(embed=embed, view=SingleOrderView(self.order_id), ephemeral=True)
+
+
+class OrderDashboardView(discord.ui.View):
+    """Dynamic dashboard view with clickable order buttons."""
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.build_buttons()
+
+    def build_buttons(self):
+        self.clear_items()
+        if not orders_data["orders"]:
+            return
+
+        for oid, o in orders_data["orders"].items():
+            label = f"#{oid}"
+            self.add_item(OrderButton(oid, label))
+
+
+# ============================================================
+# BUILD EMBED (Updated to show clickable buttons)
+# ============================================================
+def build_clickable_order_dashboard():
+    """Build the order dashboard embed."""
+    embed = discord.Embed(
+        title="📦 Foxhole FAC Orders Dashboard",
+        color=discord.Color.blurple(),
+        timestamp=datetime.now(timezone.utc)
+    )
+
+    if not orders_data["orders"]:
+        embed.description = "No active orders. Use `/order_create` to add one."
+        return embed
+
+    header = "**ID | Item | Qty | Status | Priority | Claimed By**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    lines = []
+    for oid, o in orders_data["orders"].items():
+        status = o["status"]
+        priority = o.get("priority", "Normal")
+        item = o["item"]
+        qty = o["quantity"]
+        claimed = "-"
+        if o.get("claimed_by"):
+            claimed = f"<@{o['claimed_by']}>"
+
+        priority_icon = {"High": "🔴", "Normal": "🟡", "Low": "🟢"}.get(priority, "🟢")
+        lines.append(f"**#{oid}** | {item} | {qty} | {status} | {priority_icon} {priority} | {claimed}")
+
+    embed.description = f"{header}\n" + "\n".join(lines)
+    embed.set_footer(text="💡 Click an Order ID below to manage it.")
+    return embed
+
+
+# ============================================================
+# COMMAND TO SHOW THE CLICKABLE DASHBOARD
+# ============================================================
+@bot.tree.command(name="orders", description="Show the interactive order management dashboard.")
+async def orders(inter: discord.Interaction):
+    await inter.response.defer(ephemeral=False)
+
+    view = OrderDashboardView()
+    embed = build_clickable_order_dashboard()
+
+    await inter.followup.send(embed=embed, view=view)
+
+
 # ------------------------------------------------------------
 # Command: /order_manage — Open interactive controls for one order
 # ------------------------------------------------------------
@@ -526,6 +649,7 @@ async def on_ready():
     print(f"✅ Logged in as {bot.user}")
     weekly_leaderboard.start()
     refresh_dashboard_loop.start()
+    refresh_orders_loop.start()
 
 # ============================================================
 # COMMANDS
