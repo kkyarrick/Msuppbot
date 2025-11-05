@@ -218,7 +218,7 @@ def build_dashboard_embed():
         return embed
 
     header = "**Tunnel | Supplies | Usage/hr | Duration**\n━━━━━━━━━━━━━━━━━━━"
-    rows = [header, "─" * 52]
+    rows = []
 
     for name, data in tunnels.items():
         usage = int(data.get("usage_rate", 0))
