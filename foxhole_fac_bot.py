@@ -191,40 +191,37 @@ def build_dashboard_embed():
         color=0x00ff99,
         timestamp=datetime.now(timezone.utc)
     )
+
     if not tunnels:
         embed.description = "No tunnels added yet. Use `/addtunnel`."
         return embed
 
-    for name, data in tunnels.items():
-        usage = data.get("usage_rate", 0)
-        supplies = data.get("total_supplies", 0)
-        hours_left = supplies / usage if usage > 0 else 0
-        # Round only for display — keep decimals in saved data
-        display_supplies = int(supplies)  # round down
-        display_usage = int(usage)
-        display_hours = int(hours_left)
+    header = "**Tunnel | Supplies | Usage/hr | Duration**\n━━━━━━━━━━━━━━━━━━━"
+    rows = []
 
-        # Hoverable ? symbol for location
+    for name, data in tunnels.items():
+        usage = int(data.get("usage_rate", 0))
+        supplies = int(data.get("total_supplies", 0))
         location_info = data.get("location", "Unknown location")
-        hover_symbol = f"[❔](https://dummy.link '{location_info}')"
-        
-        # 🟢🟡🔴 Traffic light system
+        hours_left = int(supplies / usage) if usage > 0 else 0
+
+        # Traffic light system
         if hours_left >= 24:
-           status = "🟢"
+            status = "🟢"
         elif hours_left >= 4:
-           status = "🟡"
+            status = "🟡"
         else:
             status = "🔴"
 
-        embed.add_field(
-           name=f"🔧 {name}",
-           value=(
-              f"Supplies: **{display_supplies:,}**\n"
-              f"Usage: **{display_usage:,}/hr**\n"
-              f"Duration: {status} **{display_hours} hrs**"
-            ),
-         inline=False,
-    )
+        # Hoverable ? symbol for location
+        hover_symbol = f"[❔](https://dummy.link '{location_info}')"
+
+        # Format the row
+        row = f"{hover_symbol} **{name}** | {supplies:,} | {usage}/hr | {status} {hours_left}h"
+        rows.append(row)
+
+    embed.description = f"{header}\n" + "\n".join(rows)
+    embed.set_footer(text="🕒 Updated automatically every 2 minutes.")
     return embed
 
 async def refresh_dashboard(guild: discord.Guild):
@@ -415,6 +412,31 @@ async def leaderboard(interaction: discord.Interaction):
 
     except Exception as e:
         await interaction.followup.send(f"⚠️ Error showing leaderboard: {e}", ephemeral=True)
+
+@bot.tree.command(name="deletetunnel", description="Officer-only: Delete a tunnel from the dashboard.")
+async def deletetunnel(interaction: discord.Interaction, name: str):
+    await interaction.response.defer(ephemeral=True)
+
+    officer_role = discord.utils.get(interaction.guild.roles, name="Officer")
+    if not officer_role or officer_role not in interaction.user.roles:
+        await interaction.followup.send("🚫 You do not have permission to use this command.", ephemeral=True)
+        return
+
+    if name not in tunnels:
+        await interaction.followup.send(f"❌ Tunnel **{name}** not found.", ephemeral=True)
+        return
+
+    del tunnels[name]
+    save_data(DATA_FILE, tunnels)
+    await refresh_dashboard(interaction.guild)
+
+    await log_action(
+        interaction.guild,
+        f"{interaction.user.display_name} deleted tunnel **{name}**."
+    )
+
+    await interaction.followup.send(f"🗑️ Tunnel **{name}** deleted successfully and dashboard updated.", ephemeral=True)
+
 
 @bot.tree.command(name="endwar", description="Officer-only: show totals and reset all tunnel and supply data.")
 async def endwar(inter: discord.Interaction):
@@ -611,6 +633,175 @@ async def deletetunnel(interaction: discord.Interaction, name: str):
     )
 
     await interaction.followup.send(f"🗑️ Tunnel **{name}** deleted successfully and dashboard updated.", ephemeral=True)
+
+# ============================================================
+# ORDERS SYSTEM
+# ============================================================
+
+ORDERS_FILE = "orders.json"
+
+def load_orders():
+    if os.path.exists(ORDERS_FILE):
+        with open(ORDERS_FILE, "r") as f:
+            return json.load(f)
+    return {"next_id": 1, "orders": {}}
+
+def save_orders():
+    with open(ORDERS_FILE, "w") as f:
+        json.dump(orders_data, f, indent=4)
+
+orders_data = load_orders()
+
+def has_authorized_role(member: discord.Member):
+    """Check if the user has one of the authorized roles."""
+    allowed_roles = ["FAC Cert", "Logi Cert", "NCO", "Officer"]
+    return any(r.name in allowed_roles for r in member.roles)
+
+# ------------------------------------------------------------
+# Create Order
+# ------------------------------------------------------------
+@bot.tree.command(name="order_create", description="Create a new order request.")
+async def order_create(inter: discord.Interaction, item: str, quantity: int, priority: str = "Normal"):
+    await inter.response.defer(ephemeral=True)
+
+    if not has_authorized_role(inter.user):
+        await inter.followup.send("🚫 You do not have permission to create orders.", ephemeral=True)
+        return
+
+    order_id = str(orders_data["next_id"])
+    orders_data["next_id"] += 1
+
+    orders_data["orders"][order_id] = {
+        "item": item,
+        "quantity": quantity,
+        "priority": priority.capitalize(),
+        "status": "Order Placed",
+        "requested_by": str(inter.user.id),
+        "claimed_by": None,
+        "timestamps": {"created": datetime.now(timezone.utc).isoformat()},
+    }
+
+    save_orders()
+
+    await log_action(
+        inter.guild,
+        f"{inter.user.display_name} placed new order **#{order_id}** — {item} x{quantity} ({priority})."
+    )
+
+    await inter.followup.send(f"🧾 Order **#{order_id}** for **{item} x{quantity}** created successfully.", ephemeral=True)
+
+# ------------------------------------------------------------
+# Claim Order
+# ------------------------------------------------------------
+@bot.tree.command(name="order_claim", description="Claim an order for production.")
+async def order_claim(inter: discord.Interaction, order_id: int):
+    await inter.response.defer(ephemeral=True)
+
+    if not has_authorized_role(inter.user):
+        await inter.followup.send("🚫 You are not authorized to claim orders.", ephemeral=True)
+        return
+
+    order_id = str(order_id)
+    order = orders_data["orders"].get(order_id)
+    if not order:
+        await inter.followup.send(f"❌ Order **#{order_id}** not found.", ephemeral=True)
+        return
+
+    order["claimed_by"] = str(inter.user.id)
+    order["status"] = "Order Claimed"
+    order["timestamps"]["claimed"] = datetime.now(timezone.utc).isoformat()
+    save_orders()
+
+    await log_action(inter.guild, f"{inter.user.display_name} claimed order **#{order_id}** ({order['item']} x{order['quantity']}).")
+    await inter.followup.send(f"🛠 Order **#{order_id}** claimed successfully.", ephemeral=True)
+
+# ------------------------------------------------------------
+# Update Order Status
+# ------------------------------------------------------------
+@bot.tree.command(name="order_update", description="Update an order’s status manually.")
+async def order_update(inter: discord.Interaction, order_id: int, status: str):
+    await inter.response.defer(ephemeral=True)
+
+    if not has_authorized_role(inter.user):
+        await inter.followup.send("🚫 You are not authorized to update orders.", ephemeral=True)
+        return
+
+    order_id = str(order_id)
+    order = orders_data["orders"].get(order_id)
+    if not order:
+        await inter.followup.send(f"❌ Order **#{order_id}** not found.", ephemeral=True)
+        return
+
+    valid_statuses = [
+        "Order Placed", "Order Claimed", "Order Started",
+        "In Progress", "Ready for Collection", "Complete"
+    ]
+    if status not in valid_statuses:
+        await inter.followup.send(f"⚠️ Invalid status. Choose one of: {', '.join(valid_statuses)}", ephemeral=True)
+        return
+
+    order["status"] = status
+    order["timestamps"]["last_update"] = datetime.now(timezone.utc).isoformat()
+    save_orders()
+
+    await log_action(inter.guild, f"{inter.user.display_name} updated order **#{order_id}** → **{status}**.")
+    await inter.followup.send(f"✅ Order **#{order_id}** marked as **{status}**.", ephemeral=True)
+
+# ------------------------------------------------------------
+# Delete Order
+# ------------------------------------------------------------
+@bot.tree.command(name="order_delete", description="Officer-only: Delete an order.")
+async def order_delete(inter: discord.Interaction, order_id: int):
+    await inter.response.defer(ephemeral=True)
+
+    officer_role = discord.utils.get(inter.guild.roles, name="Officer")
+    if not officer_role or officer_role not in inter.user.roles:
+        await inter.followup.send("🚫 Only Officers can delete orders.", ephemeral=True)
+        return
+
+    order_id = str(order_id)
+    if order_id not in orders_data["orders"]:
+        await inter.followup.send(f"❌ Order **#{order_id}** not found.", ephemeral=True)
+        return
+
+    deleted = orders_data["orders"].pop(order_id)
+    save_orders()
+
+    await log_action(inter.guild, f"{inter.user.display_name} deleted order **#{order_id}** ({deleted['item']} x{deleted['quantity']}).")
+    await inter.followup.send(f"🗑️ Order **#{order_id}** deleted successfully.", ephemeral=True)
+
+# ------------------------------------------------------------
+# List Orders
+# ------------------------------------------------------------
+@bot.tree.command(name="order_list", description="List all current orders grouped by status.")
+async def order_list(inter: discord.Interaction):
+    await inter.response.defer(thinking=True)
+
+    if not orders_data["orders"]:
+        await inter.followup.send("📦 No active orders found.", ephemeral=True)
+        return
+
+    grouped = {}
+    for oid, o in orders_data["orders"].items():
+        grouped.setdefault(o["status"], []).append((oid, o))
+
+    embed = discord.Embed(
+        title="📋 Active FAC Orders",
+        color=discord.Color.teal(),
+        timestamp=datetime.now(timezone.utc)
+    )
+
+    for status, entries in grouped.items():
+        lines = []
+        for oid, o in entries:
+            requester = await bot.fetch_user(int(o["requested_by"]))
+            claimed = f" — Claimed by {(await bot.fetch_user(int(o['claimed_by']))).display_name}" if o["claimed_by"] else ""
+            lines.append(f"**#{oid}** — {o['item']} x{o['quantity']} ({o['priority']}){claimed} — by {requester.display_name}")
+        embed.add_field(name=f"🔹 {status} ({len(entries)})", value="\n".join(lines), inline=False)
+
+    embed.set_footer(text="Use /order_update or /order_claim to modify orders.")
+    await inter.followup.send(embed=embed)
+
 
 
 # ============================================================
