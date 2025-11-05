@@ -610,30 +610,6 @@ async def help_command(inter: discord.Interaction):
     embed.set_footer(text="Use /help anytime for a quick reference.")
     await inter.response.send_message(embed=embed, ephemeral=True)
 
-@bot.tree.command(name="deletetunnel", description="Officer-only: Delete a tunnel from the dashboard.")
-async def deletetunnel(interaction: discord.Interaction, name: str):
-    await interaction.response.defer(ephemeral=True)
-
-    officer_role = discord.utils.get(interaction.guild.roles, name="Officer")
-    if not officer_role or officer_role not in interaction.user.roles:
-        await interaction.followup.send("🚫 You do not have permission to use this command.", ephemeral=True)
-        return
-
-    if name not in tunnels:
-        await interaction.followup.send(f"❌ Tunnel **{name}** not found.", ephemeral=True)
-        return
-
-    del tunnels[name]
-    save_data(DATA_FILE, tunnels)
-    await refresh_dashboard(interaction.guild)
-
-    await log_action(
-        interaction.guild,
-        f"{interaction.user.display_name} deleted tunnel **{name}**."
-    )
-
-    await interaction.followup.send(f"🗑️ Tunnel **{name}** deleted successfully and dashboard updated.", ephemeral=True)
-
 # ============================================================
 # ORDERS SYSTEM
 # ============================================================
