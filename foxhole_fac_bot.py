@@ -217,9 +217,7 @@ def build_dashboard_embed():
         embed.description = "No tunnels added yet. Use `/addtunnel`."
         return embed
 
-    # Header for readability (❔ has no label)
-    header = f"{'':<3}{'Tunnel':<16}{'Supplies':>10}{'Usage/hr':>12}{'Status':>10}"
-    rows = [header, "─" * 55]
+    lines = ["**Tunnel | Supplies | Usage/hr | Duration**", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"]
 
     for name, data in tunnels.items():
         usage = int(data.get("usage_rate", 0))
@@ -227,7 +225,6 @@ def build_dashboard_embed():
         location_info = data.get("location", "Unknown location")
         hours_left = int(supplies / usage) if usage > 0 else 0
 
-        # 🟢🟡🔴 Traffic light
         if hours_left >= 24:
             status = "🟢"
         elif hours_left >= 4:
@@ -235,20 +232,15 @@ def build_dashboard_embed():
         else:
             status = "🔴"
 
-        # Hoverable ❔ link as separate column
         hover_symbol = f"[❔](https://dummy.link '{location_info}')"
-
         line = (
-            f"{hover_symbol:<3}"  # dedicated hover column
-            f"{name:<16}"
-            f"{supplies:>10,}"
-            f"{usage:>10}/hr"
-            f"{status:>8} {hours_left:>3}h"
+            f"{hover_symbol} **{name}** | "
+            f"📦 {supplies:,} | ⚙️ {usage}/hr | "
+            f"{status} {hours_left} hrs"
         )
-        rows.append(line)
+        lines.append(line)
 
-    # Wrap in code block for alignment
-    embed.description = f"```{'\\n'.join(rows)}```"
+    embed.description = "\n".join(lines)
     embed.set_footer(text="🕒 Updated every 2 minutes.")
     return embed
 
