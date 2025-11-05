@@ -194,16 +194,16 @@ class TunnelButton(Button):
 class DashboardView(View):
     def __init__(self):
         super().__init__(timeout=None)
-        self.rebuild()
+        self.re()
 
-    def rebuild(self):
+    def re(self):
         self.clear_items()
         for name in tunnels.keys():
             self.add_item(TunnelButton(name))
 
 
 # ============================================================
-# EMBED BUILDERS
+# EMBED ERS
 # ============================================================
 
 def build_dashboard_embed():
@@ -224,10 +224,10 @@ def build_dashboard_embed():
     for name, data in tunnels.items():
         usage = int(data.get("usage_rate", 0))
         supplies = int(data.get("total_supplies", 0))
-        location_info = data.get("location", "Unknown location")
+        location_info = data.get("location", "Unknown")
         hours_left = int(supplies / usage) if usage > 0 else 0
 
-        # Traffic light system
+        # Status light
         if hours_left >= 24:
             status = "🟢"
         elif hours_left >= 4:
@@ -235,17 +235,13 @@ def build_dashboard_embed():
         else:
             status = "🔴"
 
-        # Hoverable ? symbol for location
         hover_symbol = f"[❔](https://dummy.link '{location_info}')"
-
-        # Format the row
         line = f"{hover_symbol} {name:<16}{supplies:>10,}{usage:>10}/hr{status:>8} {hours_left}h"
         rows.append(line)
-        
-   # Use a monospaced code block for alignment
+
+    # Use a monospaced code block for alignment
     embed.description = f"```{'\\n'.join(rows)}```"
-    embed.description = f"{header}\n" + "\n".join(rows)
-    embed.set_footer(text="🕒 Updated automatically every 2 minutes.")
+    embed.set_footer(text="🕒  Updated automatically every 2 minutes.")
     return embed
 
 async def refresh_dashboard(guild: discord.Guild):
