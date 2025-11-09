@@ -61,7 +61,7 @@ def load_orders():
 
 tunnels = load_data(DATA_FILE, {})
 users = load_data(USER_FILE, {})
-dashboard_info = load_data(DASH_FILE, {})  # {guild_id: {"channel": id, "message": id}}
+_info = load_data(DASH_FILE, {})  # {guild_id: {"channel": id, "message": id}}
 
 def catch_up_tunnels():
     now = datetime.now(timezone.utc)
@@ -92,7 +92,7 @@ async def log_action(guild: discord.Guild, message: str):
     """Posts log messages to the FAC log thread for auditing."""
     try:
         guild_id = str(guild.id)
-        log_channel_id = dashboard_info.get(guild_id, {}).get("log_channel")
+        log_channel_id = _info.get(guild_id, {}).get("log_channel")
 
         if not log_channel_id:
             return  # Logging not configured yet
@@ -142,7 +142,7 @@ class StackSubmitModal(discord.ui.Modal, title="Submit Stacks"):
         save_data(DATA_FILE, tunnels)
         save_data(USER_FILE, users)
 
-        await refresh_dashboard(interaction.guild)
+        await refresh_(interaction.guild)
         await interaction.response.send_message(
             f"🪣 Submitted {amount} supplies ({stacks} stacks) to **{self.tunnel_name}**.",
             ephemeral=True
@@ -201,6 +201,75 @@ class DashboardView(View):
         for name in tunnels.keys():
             self.add_item(TunnelButton(name))
 
+# ============================================================
+# DASHBOARD PAGINATION SYSTEM
+# ============================================================
+
+class DashboardPaginator(discord.ui.View):
+    def __init__(self, tunnels, per_page=8):
+        super().__init__(timeout=None)
+        self.tunnels = list(tunnels.items())
+        self.per_page = per_page
+        self.page = 0
+        self.total_pages = max(1, -(-len(self.tunnels) // self.per_page))  # ceiling division
+
+    @discord.ui.button(label="⏮️", style=discord.ButtonStyle.gray)
+    async def first_page(self, interaction, _):
+        self.page = 0
+        await self.update(interaction)
+
+    @discord.ui.button(label="◀️", style=discord.ButtonStyle.gray)
+    async def prev_page(self, interaction, _):
+        if self.page > 0:
+            self.page -= 1
+        await self.update(interaction)
+
+    @discord.ui.button(label="▶️", style=discord.ButtonStyle.gray)
+    async def next_page(self, interaction, _):
+        if self.page < self.total_pages - 1:
+            self.page += 1
+        await self.update(interaction)
+
+    @discord.ui.button(label="⏭️", style=discord.ButtonStyle.gray)
+    async def last_page(self, interaction, _):
+        self.page = self.total_pages - 1
+        await self.update(interaction)
+
+    def build_page_embed(self):
+        embed = discord.Embed(
+            title=f"🛠 Foxhole FAC Dashboard  — Page {self.page+1}/{self.total_pages}",
+            color=0x00ff99,
+            timestamp=datetime.now(timezone.utc)
+        )
+
+        start = self.page * self.per_page
+        end = start + self.per_page
+        subset = self.tunnels[start:end]
+
+        for name, data in subset:
+            supplies = int(data.get("total_supplies", 0))
+            usage = int(data.get("usage_rate", 0))
+            hours = int(supplies / usage) if usage > 0 else 0
+
+            if hours >= 24:
+                status = "🟢"
+            elif hours >= 4:
+                status = "🟡"
+            else:
+                status = "🔴"
+
+            embed.add_field(name="Tunnel / Usage", value=f"**{name}**\n`{usage}/hr`", inline=True)
+            embed.add_field(name="Supplies", value=f"**{supplies:,}**", inline=True)
+            embed.add_field(name="Status", value=f"{status} **{hours}h**", inline=True)
+
+        embed.set_footer(text="🕒 Updated every 2 minutes · Use ◀️▶️ to navigate")
+        return embed
+
+    async def update(self, interaction):
+        embed = self.build_page_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+
 
 # ============================================================
 # EMBED BUILDERS
@@ -248,31 +317,21 @@ def build_dashboard_embed():
     return embed
 
 async def refresh_dashboard(guild: discord.Guild):
-    """Edit or recreate the persistent dashboard message if it exists."""
-    dashboard_view.rebuild()
+    """Edit the persistent dashboard message if it exists."""
+    if str(guild.id) not in dashboard_info:
+        return
 
-    gid = str(guild.id)
-    info = dashboard_info.get(gid)
-    if not info:
-        return  # No dashboard set yet
-
-    channel = guild.get_channel(info.get("channel"))
+    info = dashboard_info[str(guild.id)]
+    channel = guild.get_channel(info["channel"])
     if not channel:
-        return  # Channel deleted or missing
+        return
 
     try:
-        msg = await channel.fetch_message(info.get("message"))
-        await msg.edit(embed=build_dashboard_embed(), view=dashboard_view)
-    except discord.NotFound:
-        # 🧱 Dashboard message was deleted — recreate it
-        new_msg = await channel.send(embed=build_dashboard_embed(), view=dashboard_view)
-        dashboard_info[gid]["channel"] = channel.id
-        dashboard_info[gid]["message"] = new_msg.id
-        save_data(DASH_FILE, dashboard_info)
-        print(f"[INFO] Dashboard message was missing — recreated in {channel.name}.")
+        msg = await channel.fetch_message(info["message"])
+        paginator = DashboardPaginator(tunnels)
+        await msg.edit(embed=paginator.build_page_embed(), view=paginator)
     except Exception as e:
         print(f"[ERROR] Failed to refresh dashboard in {guild.name}: {e}")
-
 
 # ============================================================
 # ORDER DASHBOARD VIEW
@@ -798,7 +857,8 @@ async def dashboard(interaction: discord.Interaction):
         await refresh_dashboard(interaction.guild)
         await interaction.followup.send("🔁 Dashboard refreshed.", ephemeral=True)
         return
-    msg = await interaction.followup.send(embed=build_dashboard_embed(), view=dashboard_view)
+    paginator = DashboardPaginator(tunnels)
+    msg = await interaction.followup.send(embed=paginator.build_page_embed(), view=paginator)
     dashboard_info[gid] = {"channel": msg.channel.id, "message": msg.id}
     save_data(DASH_FILE, dashboard_info)
     await interaction.followup.send("✅ Dashboard created and bound to this channel.", ephemeral=True)
