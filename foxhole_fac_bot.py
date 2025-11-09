@@ -61,7 +61,7 @@ def load_orders():
 
 tunnels = load_data(DATA_FILE, {})
 users = load_data(USER_FILE, {})
-_info = load_data(DASH_FILE, {})  # {guild_id: {"channel": id, "message": id}}
+dashboard_info = load_data(DASH_FILE, {})  # {guild_id: {"channel": id, "message": id}}
 
 def catch_up_tunnels():
     now = datetime.now(timezone.utc)
@@ -92,7 +92,7 @@ async def log_action(guild: discord.Guild, message: str):
     """Posts log messages to the FAC log thread for auditing."""
     try:
         guild_id = str(guild.id)
-        log_channel_id = _info.get(guild_id, {}).get("log_channel")
+        log_channel_id = dashboard_info.get(guild_id, {}).get("log_channel")
 
         if not log_channel_id:
             return  # Logging not configured yet
