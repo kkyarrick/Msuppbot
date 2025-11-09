@@ -206,38 +206,21 @@ class DashboardView(View):
 # ============================================================
 
 class DashboardPaginator(discord.ui.View):
-    def __init__(self, tunnels, per_page=8):
+    """Combined paginated + interactive dashboard for tunnels."""
+    def __init__(self, tunnels, per_page=5):
         super().__init__(timeout=None)
         self.tunnels = list(tunnels.items())
         self.per_page = per_page
         self.page = 0
-        self.total_pages = max(1, -(-len(self.tunnels) // self.per_page))  # ceiling division
+        self.total_pages = max(1, -(-len(self.tunnels) // self.per_page))
+        self.build_page_buttons()
 
-    @discord.ui.button(label="⏮️", style=discord.ButtonStyle.gray)
-    async def first_page(self, interaction, _):
-        self.page = 0
-        await self.update(interaction)
-
-    @discord.ui.button(label="◀️", style=discord.ButtonStyle.gray)
-    async def prev_page(self, interaction, _):
-        if self.page > 0:
-            self.page -= 1
-        await self.update(interaction)
-
-    @discord.ui.button(label="▶️", style=discord.ButtonStyle.gray)
-    async def next_page(self, interaction, _):
-        if self.page < self.total_pages - 1:
-            self.page += 1
-        await self.update(interaction)
-
-    @discord.ui.button(label="⏭️", style=discord.ButtonStyle.gray)
-    async def last_page(self, interaction, _):
-        self.page = self.total_pages - 1
-        await self.update(interaction)
-
+    # -----------------------------------------
+    # Build the embed for the current page
+    # -----------------------------------------
     def build_page_embed(self):
         embed = discord.Embed(
-            title=f"🛠 Foxhole FAC Dashboard  — Page {self.page+1}/{self.total_pages}",
+            title=f"🛠 Foxhole FAC Dashboard — Page {self.page + 1}/{self.total_pages}",
             color=0x00ff99,
             timestamp=datetime.now(timezone.utc)
         )
@@ -250,26 +233,94 @@ class DashboardPaginator(discord.ui.View):
             supplies = int(data.get("total_supplies", 0))
             usage = int(data.get("usage_rate", 0))
             hours = int(supplies / usage) if usage > 0 else 0
+            status = "🟢" if hours >= 24 else "🟡" if hours >= 4 else "🔴"
+            embed.add_field(
+                name=f"{name}",
+                value=f"**Supplies:** {supplies:,} | **Usage:** {usage}/hr | {status} **{hours}h**",
+                inline=False
+            )
 
-            if hours >= 24:
-                status = "🟢"
-            elif hours >= 4:
-                status = "🟡"
-            else:
-                status = "🔴"
-
-            embed.add_field(name="Tunnel / Usage", value=f"**{name}**\n`{usage}/hr`", inline=True)
-            embed.add_field(name="Supplies", value=f"**{supplies:,}**", inline=True)
-            embed.add_field(name="Status", value=f"{status} **{hours}h**", inline=True)
-
-        embed.set_footer(text="🕒 Updated every 2 minutes · Use ◀️▶️ to navigate")
+        embed.set_footer(text="Updated every 2 minutes. Use the buttons below to add supplies or navigate pages.")
         return embed
 
-    async def update(self, interaction):
-        embed = self.build_page_embed()
-        await interaction.response.edit_message(embed=embed, view=self)
+    # -----------------------------------------
+    # Navigation Buttons
+    # -----------------------------------------
+    @discord.ui.button(label="⏮️", style=discord.ButtonStyle.gray)
+    async def first_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = 0
+        self.build_page_buttons()
+        await interaction.response.edit_message(embed=self.build_page_embed(), view=self)
 
+    @discord.ui.button(label="◀️", style=discord.ButtonStyle.gray)
+    async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.page > 0:
+            self.page -= 1
+        self.build_page_buttons()
+        await interaction.response.edit_message(embed=self.build_page_embed(), view=self)
 
+    @discord.ui.button(label="▶️", style=discord.ButtonStyle.gray)
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.page < self.total_pages - 1:
+            self.page += 1
+        self.build_page_buttons()
+        await interaction.response.edit_message(embed=self.build_page_embed(), view=self)
+
+    @discord.ui.button(label="⏭️", style=discord.ButtonStyle.gray)
+    async def last_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = self.total_pages - 1
+        self.build_page_buttons()
+        await interaction.response.edit_message(embed=self.build_page_embed(), view=self)
+
+    # -----------------------------------------
+    # Rebuild tunnel buttons dynamically
+    # -----------------------------------------
+    def build_page_buttons(self):
+        """Clear and rebuild tunnel buttons for current page."""
+        # remove old items except nav buttons (we rebuild all)
+        self.clear_items()
+
+        # navigation buttons
+        self.add_item(discord.ui.Button(label="⏮️", style=discord.ButtonStyle.gray, custom_id="nav_first"))
+        self.add_item(discord.ui.Button(label="◀️", style=discord.ButtonStyle.gray, custom_id="nav_prev"))
+        self.add_item(discord.ui.Button(label="▶️", style=discord.ButtonStyle.gray, custom_id="nav_next"))
+        self.add_item(discord.ui.Button(label="⏭️", style=discord.ButtonStyle.gray, custom_id="nav_last"))
+
+        # tunnel buttons for visible subset
+        start = self.page * self.per_page
+        end = start + self.per_page
+        for name, _ in self.tunnels[start:end]:
+            # use your existing TunnelButton class
+            self.add_item(TunnelButton(name))
+
+    # -----------------------------------------
+    # Handle navigation click manually
+    # -----------------------------------------
+    async def interaction_check(self, interaction: discord.Interaction):
+        cid = interaction.data.get("custom_id")
+        if not cid:
+            return True
+
+        # Handle navigation clicks
+        if cid.startswith("nav_"):
+            old_page = self.page
+            if cid == "nav_first":
+                self.page = 0
+            elif cid == "nav_prev" and self.page > 0:
+                self.page -= 1
+            elif cid == "nav_next" and self.page < self.total_pages - 1:
+                self.page += 1
+            elif cid == "nav_last":
+                self.page = self.total_pages - 1
+
+            if old_page != self.page:
+                self.build_page_buttons()
+                await interaction.response.edit_message(embed=self.build_page_embed(), view=self)
+            else:
+                await interaction.response.defer()
+            return False
+
+        return True
 
 # ============================================================
 # EMBED BUILDERS
@@ -758,6 +809,7 @@ async def on_ready():
     weekly_leaderboard.start()
     refresh_dashboard_loop.start()
     refresh_orders_loop.start()
+    bot.add_view(DashboardPaginator(tunnels))
 
 # ============================================================
 # COMMANDS
