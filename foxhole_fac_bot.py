@@ -210,61 +210,40 @@ def build_dashboard_embed():
     embed = discord.Embed(
         title="🛠 Foxhole FAC Dashboard",
         color=0x00ff99,
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(timezone.utc)
     )
 
     if not tunnels:
         embed.description = "No tunnels added yet. Use `/addtunnel`."
         return embed
 
-    # ---- helpers -----------------------------------------------------------
-    def trunc(text: str, width: int) -> str:
-        """Truncate text with ellipsis if too long."""
-        return text if len(text) <= width else text[: max(0, width - 1)] + "…"
+    # Sort alphabetically or numerically if your tunnels are numbered
+    sorted_tunnels = dict(sorted(tunnels.items(), key=lambda x: x[0].lower()))
 
-    # Build rows first
-    raw_rows = []
-    for name, data in tunnels.items():
+    for name, data in sorted_tunnels.items():
         supplies = int(data.get("total_supplies", 0))
-        usage    = int(data.get("usage_rate", 0))
-        loc      = str(data.get("location", "Unknown"))
-        hours    = int(supplies / usage) if usage > 0 else 0
-        status   = "🟢" if hours >= 24 else "🟡" if hours >= 4 else "🔴"
-        raw_rows.append((name, supplies, usage, status, hours, loc))
+        usage = int(data.get("usage_rate", 0))
+        hours = int(supplies / usage) if usage > 0 else 0
 
-    # Dynamic column widths (capped)
-    NAME_CAP = 18
-    LOC_CAP  = 18
-    name_w = min(max(6, max(len(n) for n, *_ in raw_rows)), NAME_CAP)
-    loc_w  = min(max(6, max(len(l) for *_, l in raw_rows)), LOC_CAP)
-    sup_w  = 10   # Supplies width
-    use_w  = 8    # Usage width
+        # Traffic light system
+        if hours >= 24:
+            status = "🟢"
+        elif hours >= 4:
+            status = "🟡"
+        else:
+            status = "🔴"
 
-    # Header + separator
-    header = (
-        f"{'Tunnel':<{name_w}}  "
-        f"{'Supplies':>{sup_w}}  "
-        f"{'Usage/hr':>{use_w}}  "
-        f"{'Status':>8}  "
-        f"{'Location':<{loc_w}}"
-    )
-    sep = "─" * len(header)
+        # Compact field layout
+        tunnel_field = f"**{name}**\n`{usage}/hr`"
+        supplies_field = f"**{supplies:,}**"
+        status_field = f"{status} **{hours}h**"
 
-    # Format rows
-    lines = [header, sep]
-    for name, supplies, usage, status, hours, loc in raw_rows:
-        name = trunc(name, name_w)
-        loc  = trunc(loc,  loc_w)
-        line = (
-            f"{name:<{name_w}}  "
-            f"{supplies:>{sup_w},}  "
-            f"{usage:>{use_w}}/hr  "
-            f"{status} {hours:>3}h  "
-            f"{loc:<{loc_w}}"
-        )
-        lines.append(line)
+        # Add fields as inlines to form a 3-column dashboard
+        embed.add_field(name="Tunnel / Usage", value=tunnel_field, inline=True)
+        embed.add_field(name="Supplies", value=supplies_field, inline=True)
+        embed.add_field(name="Status", value=status_field, inline=True)
+        embed.add_field(name="\u200b", value="━━━━━━━━━━━", inline=False)
 
-    embed.description = f"```{chr(10).join(lines)}```"
     embed.set_footer(text="🕒 Updated every 2 minutes.")
     return embed
 
