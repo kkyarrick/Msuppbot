@@ -207,7 +207,7 @@ class DashboardView(View):
 
 class DashboardPaginator(discord.ui.View):
     """Combined paginated + interactive dashboard for tunnels."""
-    def __init__(self, tunnels, per_page=5):
+    def __init__(self, tunnels, per_page=8):
         super().__init__(timeout=None)
         self.tunnels = list(tunnels.items())
         self.per_page = per_page
