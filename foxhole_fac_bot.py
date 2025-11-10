@@ -564,7 +564,7 @@ class OrderStatusSelect(discord.ui.Select):
             options=options
         )
 
-   async def callback(self, interaction: discord.Interaction):
+    async def callback(self, interaction: discord.Interaction):
         new_status = self.values[0]
         order = orders_data["orders"].get(self.order_id)
 
