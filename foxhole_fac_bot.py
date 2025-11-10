@@ -164,21 +164,21 @@ class TunnelButton(Button):
     async def callback(self, interaction: discord.Interaction):
         view = discord.ui.View(timeout=30)
 
-        async def done_callback(inter: discord.Interaction):
+        async def done_callback(interaction: discord.Interaction):
             tunnels[self.tunnel]["total_supplies"] += SUPPLY_INCREMENT
-            user_id = str(inter.user.id)
+            user_id = str(interaction.user.id)
             users[user_id] = users.get(user_id, 0) + SUPPLY_INCREMENT
             save_data(DATA_FILE, tunnels)
             save_data(USER_FILE, users)
-            await refresh_dashboard(inter.guild)
-            await inter.response.edit_message(
+            await refresh_dashboard(interaction.guild)
+            await interaction.response.edit_message(
                 content=f"🪣 Added {SUPPLY_INCREMENT} supplies to **{self.tunnel}**!",
                 view=None
             )
 
-        async def stack_callback(inter: discord.Interaction):
+        async def stack_callback(interaction: discord.Interaction):
             modal = StackSubmitModal(self.tunnel)
-            await inter.response.send_modal(modal)
+            await interaction.response.send_modal(modal)
 
         view.add_item(discord.ui.Button(label="1500 (Done)", style=discord.ButtonStyle.green))
         view.children[0].callback = done_callback
@@ -486,23 +486,23 @@ async def refresh_order_dashboard(guild: discord.Guild):
 # Command to Create or Refresh Dashboard
 # ------------------------------------------------------------
 @bot.tree.command(name="order_dashboard", description="Show or bind the order management dashboard.")
-async def order_dashboard(inter: discord.Interaction):
-    await inter.response.defer()
+async def order_dashboard(interaction: discord.Interaction):
+    await interaction.response.defer()
 
-    guild_id = str(inter.guild_id)
+    guild_id = str(interaction.guild_id)
     embed = build_order_dashboard()
 
     if guild_id in dashboard_info and "order_message" in dashboard_info[guild_id]:
-        await refresh_order_dashboard(inter.guild)
-        await inter.followup.send("🔁 Order dashboard refreshed.", ephemeral=True)
+        await refresh_order_dashboard(interaction.guild)
+        await interaction.followup.send("🔁 Order dashboard refreshed.", ephemeral=True)
         return
 
-    msg = await inter.followup.send(embed=embed)
+    msg = await interaction.followup.send(embed=embed)
     dashboard_info[guild_id]["order_channel"] = msg.channel.id
     dashboard_info[guild_id]["order_message"] = msg.id
     save_data(DASH_FILE, dashboard_info)
 
-    await inter.followup.send("✅ Order dashboard created and bound to this channel.", ephemeral=True)
+    await interaction.followup.send("✅ Order dashboard created and bound to this channel.", ephemeral=True)
 
 # ============================================================
 # AUTO-REFRESH ORDERS DASHBOARD (every 5 minutes)
@@ -766,14 +766,14 @@ def build_clickable_order_dashboard():
 # COMMAND TO SHOW THE CLICKABLE DASHBOARD
 # ============================================================
 @bot.tree.command(name="orders", description="Show the interactive order management dashboard.")
-async def orders(inter: discord.Interaction):
-    await inter.response.defer(ephemeral=False)
+async def orders(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=False)
 
     view = OrderDashboardView()
     embed = build_clickable_order_dashboard()
-    msg = await inter.followup.send(embed=embed, view=view)
+    msg = await interaction.followup.send(embed=embed, view=view)
 
-    guild_id = str(inter.guild_id)
+    guild_id = str(interaction.guild_id)
     if guild_id not in dashboard_info:
         dashboard_info[guild_id] = {}
 
@@ -785,13 +785,13 @@ async def orders(inter: discord.Interaction):
 # Command: /order_manage — Open interactive controls for one order
 # ------------------------------------------------------------
 @bot.tree.command(name="order_manage", description="Open an interactive view to manage a specific order.")
-async def order_manage(inter: discord.Interaction, order_id: int):
-    await inter.response.defer(ephemeral=True)
+async def order_manage(interaction: discord.Interaction, order_id: int):
+    await interaction.response.defer(ephemeral=True)
 
     order_id = str(order_id)
     order = orders_data["orders"].get(order_id)
     if not order:
-        await inter.followup.send(f"❌ Order **#{order_id}** not found.", ephemeral=True)
+        await interaction.followup.send(f"❌ Order **#{order_id}** not found.", ephemeral=True)
         return
 
     embed = discord.Embed(
@@ -806,7 +806,7 @@ async def order_manage(inter: discord.Interaction, order_id: int):
         timestamp=datetime.now(timezone.utc)
     )
 
-    await inter.followup.send(embed=embed, view=SingleOrderView(order_id), ephemeral=True)
+    await interaction.followup.send(embed=embed, view=SingleOrderView(order_id), ephemeral=True)
 
 
 # ============================================================
@@ -1011,13 +1011,13 @@ async def deletetunnel(interaction: discord.Interaction, name: str):
 
 
 @bot.tree.command(name="endwar", description="Officer-only: show totals and reset all tunnel and supply data.")
-async def endwar(inter: discord.Interaction):
-    await inter.response.defer(ephemeral=True)
+async def endwar(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
 
     # Officer-only restriction
-    officer_role = discord.utils.get(inter.guild.roles, name="Officer")
-    if not officer_role or officer_role not in inter.user.roles:
-        await inter.followup.send("🚫 You do not have permission to use this command.", ephemeral=True)
+    officer_role = discord.utils.get(interaction.guild.roles, name="Officer")
+    if not officer_role or officer_role not in interaction.user.roles:
+        await interaction.followup.send("🚫 You do not have permission to use this command.", ephemeral=True)
         return
 
     # Compute totals before reset
@@ -1033,25 +1033,25 @@ async def endwar(inter: discord.Interaction):
         color=discord.Color.red(),
         timestamp=datetime.now(timezone.utc)
     )
-    embed.set_footer(text=f"Reset performed by {inter.user.display_name}")
+    embed.set_footer(text=f"Reset performed by {interaction.user.display_name}")
 
     # Try to post summary to the leaderboard channel
-    guild_id = str(inter.guild_id)
+    guild_id = str(interaction.guild_id)
     info = dashboard_info.get(guild_id, {})
     leaderboard_channel = None
 
     if "leaderboard_channel" in info:
-        leaderboard_channel = inter.guild.get_channel(info["leaderboard_channel"])
+        leaderboard_channel = interaction.guild.get_channel(info["leaderboard_channel"])
 
     # Fallback if not found
     if not leaderboard_channel:
-        leaderboard_channel = discord.utils.get(inter.guild.text_channels, name="logistics") or \
-                              discord.utils.get(inter.guild.text_channels, name="general")
+        leaderboard_channel = discord.utils.get(interaction.guild.text_channels, name="logistics") or \
+                              discord.utils.get(interaction.guild.text_channels, name="general")
 
     if leaderboard_channel:
         await leaderboard_channel.send(embed=embed)
     else:
-        await inter.followup.send(
+        await interaction.followup.send(
             "⚠️ Could not find a leaderboard or fallback channel to post the summary.",
             ephemeral=True
         )
@@ -1063,12 +1063,12 @@ async def endwar(inter: discord.Interaction):
     save_data(USER_FILE, users)
 
     # Refresh dashboard to empty state
-    await refresh_dashboard(inter.guild)
+    await refresh_dashboard(interaction.guild)
 
-    await log_action(inter.guild, f"{inter.user.display_name} executed `/endwar` — data wiped and summary posted.")
+    await log_action(interaction.guild, f"{interaction.user.display_name} executed `/endwar` — data wiped and summary posted.")
 
     # Private confirmation
-    await inter.followup.send("✅ End of War complete. Data has been wiped clean.", ephemeral=True)
+    await interaction.followup.send("✅ End of War complete. Data has been wiped clean.", ephemeral=True)
 
 @bot.tree.command(name="checkpermissions", description="Check the bot's permissions in this channel.")
 async def checkpermissions(interaction: discord.Interaction):
@@ -1083,17 +1083,17 @@ async def checkpermissions(interaction: discord.Interaction):
     await interaction.response.send_message("\n".join(results), ephemeral=True)
 
 @bot.tree.command(name="setleaderboardchannel", description="Set the channel where weekly leaderboards will be posted.")
-async def setleaderboardchannel(inter: discord.Interaction, channel: discord.TextChannel):
+async def setleaderboardchannel(interaction: discord.Interaction, channel: discord.TextChannel):
     # Defer early to prevent "Unknown interaction" timeout
-    await inter.response.defer(ephemeral=True)
+    await interaction.response.defer(ephemeral=True)
 
     # Officer-only restriction
-    officer_role = discord.utils.get(inter.guild.roles, name="Officer")
-    if not officer_role or officer_role not in inter.user.roles:
-        await inter.followup.send("🚫 You do not have permission to use this command.", ephemeral=True)
+    officer_role = discord.utils.get(interaction.guild.roles, name="Officer")
+    if not officer_role or officer_role not in interaction.user.roles:
+        await interaction.followup.send("🚫 You do not have permission to use this command.", ephemeral=True)
         return
 
-    gid = str(inter.guild_id)
+    gid = str(interaction.guild_id)
 
     if gid not in dashboard_info:
         dashboard_info[gid] = {}
@@ -1101,31 +1101,31 @@ async def setleaderboardchannel(inter: discord.Interaction, channel: discord.Tex
     dashboard_info[gid]["leaderboard_channel"] = channel.id
     save_data(DASH_FILE, dashboard_info)
 
-    await inter.followup.send(
+    await interaction.followup.send(
         f"✅ Weekly leaderboard channel set to {channel.mention}.",
         ephemeral=True
     )
     
 @bot.tree.command(name="setlogchannel", description="Officer-only: Set the channel where FAC logs will be posted.")
-async def setlogchannel(inter: discord.Interaction, channel: discord.TextChannel):
-    await inter.response.defer(ephemeral=True)
+async def setlogchannel(interaction: discord.Interaction, channel: discord.TextChannel):
+    await interaction.response.defer(ephemeral=True)
 
-    officer_role = discord.utils.get(inter.guild.roles, name="Officer")
-    if not officer_role or officer_role not in inter.user.roles:
-        await inter.followup.send("🚫 You do not have permission to use this command.", ephemeral=True)
+    officer_role = discord.utils.get(interaction.guild.roles, name="Officer")
+    if not officer_role or officer_role not in interaction.user.roles:
+        await interaction.followup.send("🚫 You do not have permission to use this command.", ephemeral=True)
         return
 
-    guild_id = str(inter.guild.id)
+    guild_id = str(interaction.guild.id)
     if guild_id not in dashboard_info:
         dashboard_info[guild_id] = {}
 
     dashboard_info[guild_id]["log_channel"] = channel.id
     save_data(DASH_FILE, dashboard_info)
 
-    await inter.followup.send(f"✅ FAC logs will now post to {channel.mention}.", ephemeral=True)
+    await interaction.followup.send(f"✅ FAC logs will now post to {channel.mention}.", ephemeral=True)
 
 @bot.tree.command(name="help", description="Show all available Foxhole FAC commands.")
-async def help_command(inter: discord.Interaction):
+async def help_command(interaction: discord.Interaction):
     embed = discord.Embed(
         title="🛠️ Foxhole FAC Bot Commands",
         description="A full list of available commands and their uses.",
@@ -1180,7 +1180,7 @@ async def help_command(inter: discord.Interaction):
     )
 
     embed.set_footer(text="Use /help anytime for a quick reference.")
-    await inter.response.send_message(embed=embed, ephemeral=True)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # ============================================================
 # ORDERS SYSTEM
@@ -1207,11 +1207,11 @@ def has_authorized_role(member: discord.Member):
 # Create Order
 # ------------------------------------------------------------
 @bot.tree.command(name="order_create", description="Create a new order request.")
-async def order_create(inter: discord.Interaction, item: str, quantity: int, priority: str = "Normal", location: str = "Unknown"):
-    await inter.response.defer(ephemeral=True)
+async def order_create(interaction: discord.Interaction, item: str, quantity: int, priority: str = "Normal", location: str = "Unknown"):
+    await interaction.response.defer(ephemeral=True)
 
-    if not has_authorized_role(inter.user):
-        await inter.followup.send("🚫 You do not have permission to create orders.", ephemeral=True)
+    if not has_authorized_role(interaction.user):
+        await interaction.followup.send("🚫 You do not have permission to create orders.", ephemeral=True)
         return
 
     order_id = str(orders_data["next_id"])
@@ -1222,7 +1222,7 @@ async def order_create(inter: discord.Interaction, item: str, quantity: int, pri
         "quantity": quantity,
         "priority": priority.capitalize(),
         "status": "Order Placed",
-        "requested_by": str(inter.user.id),
+        "requested_by": str(interaction.user.id),
         "claimed_by": None,
         "location": location,
         "timestamps": {"created": datetime.now(timezone.utc).isoformat()},
@@ -1231,53 +1231,53 @@ async def order_create(inter: discord.Interaction, item: str, quantity: int, pri
     save_orders()
 
     await log_action(
-        inter.guild,
-        f"{inter.user.display_name} placed new order **#{order_id}** — {item} x{quantity} ({priority}) @ {location}."
+        interaction.guild,
+        f"{interaction.user.display_name} placed new order **#{order_id}** — {item} x{quantity} ({priority}) @ {location}."
     )
 
-    await inter.followup.send(f"🧾 Order **#{order_id}** for **{item} x{quantity}** created successfully at **{location}**.", ephemeral=True)
+    await interaction.followup.send(f"🧾 Order **#{order_id}** for **{item} x{quantity}** created successfully at **{location}**.", ephemeral=True)
     await refresh_order_dashboard(interaction.guild)
 
 # ------------------------------------------------------------
 # Claim Order
 # ------------------------------------------------------------
 @bot.tree.command(name="order_claim", description="Claim an order for production.")
-async def order_claim(inter: discord.Interaction, order_id: int):
-    await inter.response.defer(ephemeral=True)
+async def order_claim(interaction: discord.Interaction, order_id: int):
+    await interaction.response.defer(ephemeral=True)
 
-    if not has_authorized_role(inter.user):
-        await inter.followup.send("🚫 You are not authorized to claim orders.", ephemeral=True)
+    if not has_authorized_role(interaction.user):
+        await interaction.followup.send("🚫 You are not authorized to claim orders.", ephemeral=True)
         return
 
     order_id = str(order_id)
     order = orders_data["orders"].get(order_id)
     if not order:
-        await inter.followup.send(f"❌ Order **#{order_id}** not found.", ephemeral=True)
+        await interaction.followup.send(f"❌ Order **#{order_id}** not found.", ephemeral=True)
         return
 
-    order["claimed_by"] = str(inter.user.id)
+    order["claimed_by"] = str(interaction.user.id)
     order["status"] = "Order Claimed"
     order["timestamps"]["claimed"] = datetime.now(timezone.utc).isoformat()
     save_orders()
 
-    await log_action(inter.guild, f"{inter.user.display_name} claimed order **#{order_id}** ({order['item']} x{order['quantity']}).")
-    await inter.followup.send(f"🛠 Order **#{order_id}** claimed successfully.", ephemeral=True)
+    await log_action(interaction.guild, f"{interaction.user.display_name} claimed order **#{order_id}** ({order['item']} x{order['quantity']}).")
+    await interaction.followup.send(f"🛠 Order **#{order_id}** claimed successfully.", ephemeral=True)
 
 # ------------------------------------------------------------
 # Update Order Status
 # ------------------------------------------------------------
 @bot.tree.command(name="order_update", description="Update an order’s status manually.")
-async def order_update(inter: discord.Interaction, order_id: int, status: str):
-    await inter.response.defer(ephemeral=True)
+async def order_update(interaction: discord.Interaction, order_id: int, status: str):
+    await interaction.response.defer(ephemeral=True)
 
-    if not has_authorized_role(inter.user):
-        await inter.followup.send("🚫 You are not authorized to update orders.", ephemeral=True)
+    if not has_authorized_role(interaction.user):
+        await interaction.followup.send("🚫 You are not authorized to update orders.", ephemeral=True)
         return
 
     order_id = str(order_id)
     order = orders_data["orders"].get(order_id)
     if not order:
-        await inter.followup.send(f"❌ Order **#{order_id}** not found.", ephemeral=True)
+        await interaction.followup.send(f"❌ Order **#{order_id}** not found.", ephemeral=True)
         return
 
     valid_statuses = [
@@ -1285,48 +1285,48 @@ async def order_update(inter: discord.Interaction, order_id: int, status: str):
         "In Progress", "Ready for Collection", "Complete"
     ]
     if status not in valid_statuses:
-        await inter.followup.send(f"⚠️ Invalid status. Choose one of: {', '.join(valid_statuses)}", ephemeral=True)
+        await interaction.followup.send(f"⚠️ Invalid status. Choose one of: {', '.join(valid_statuses)}", ephemeral=True)
         return
 
     order["status"] = status
     order["timestamps"]["last_update"] = datetime.now(timezone.utc).isoformat()
     save_orders()
 
-    await log_action(inter.guild, f"{inter.user.display_name} updated order **#{order_id}** → **{status}**.")
-    await inter.followup.send(f"✅ Order **#{order_id}** marked as **{status}**.", ephemeral=True)
+    await log_action(interaction.guild, f"{interaction.user.display_name} updated order **#{order_id}** → **{status}**.")
+    await interaction.followup.send(f"✅ Order **#{order_id}** marked as **{status}**.", ephemeral=True)
 
 # ------------------------------------------------------------
 # Delete Order
 # ------------------------------------------------------------
 @bot.tree.command(name="order_delete", description="Officer-only: Delete an order.")
-async def order_delete(inter: discord.Interaction, order_id: int):
-    await inter.response.defer(ephemeral=True)
+async def order_delete(interaction: discord.Interaction, order_id: int):
+    await interaction.response.defer(ephemeral=True)
 
-    officer_role = discord.utils.get(inter.guild.roles, name="Officer")
-    if not officer_role or officer_role not in inter.user.roles:
-        await inter.followup.send("🚫 Only Officers can delete orders.", ephemeral=True)
+    officer_role = discord.utils.get(interaction.guild.roles, name="Officer")
+    if not officer_role or officer_role not in interaction.user.roles:
+        await interaction.followup.send("🚫 Only Officers can delete orders.", ephemeral=True)
         return
 
     order_id = str(order_id)
     if order_id not in orders_data["orders"]:
-        await inter.followup.send(f"❌ Order **#{order_id}** not found.", ephemeral=True)
+        await interaction.followup.send(f"❌ Order **#{order_id}** not found.", ephemeral=True)
         return
 
     deleted = orders_data["orders"].pop(order_id)
     save_orders()
 
-    await log_action(inter.guild, f"{inter.user.display_name} deleted order **#{order_id}** ({deleted['item']} x{deleted['quantity']}).")
-    await inter.followup.send(f"🗑️ Order **#{order_id}** deleted successfully.", ephemeral=True)
+    await log_action(interaction.guild, f"{interaction.user.display_name} deleted order **#{order_id}** ({deleted['item']} x{deleted['quantity']}).")
+    await interaction.followup.send(f"🗑️ Order **#{order_id}** deleted successfully.", ephemeral=True)
 
 # ------------------------------------------------------------
 # List Orders
 # ------------------------------------------------------------
 @bot.tree.command(name="order_list", description="List all current orders grouped by status.")
-async def order_list(inter: discord.Interaction):
-    await inter.response.defer(thinking=True)
+async def order_list(interaction: discord.Interaction):
+    await interaction.response.defer(thinking=True)
 
     if not orders_data["orders"]:
-        await inter.followup.send("📦 No active orders found.", ephemeral=True)
+        await interaction.followup.send("📦 No active orders found.", ephemeral=True)
         return
 
     grouped = {}
@@ -1348,7 +1348,7 @@ async def order_list(inter: discord.Interaction):
         embed.add_field(name=f"🔹 {status} ({len(entries)})", value="\n".join(lines), inline=False)
 
     embed.set_footer(text="Use /order_update or /order_claim to modify orders.")
-    await inter.followup.send(embed=embed)
+    await interaction.followup.send(embed=embed)
 
 
 
