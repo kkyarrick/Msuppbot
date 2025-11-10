@@ -282,10 +282,10 @@ class DashboardPaginator(discord.ui.View):
 
         # navigation buttons
         nav_buttons = [
-            self.add_item(discord.ui.Button(label="⏮️", style=discord.ButtonStyle.gray, custom_id="nav_first"))
-            self.add_item(discord.ui.Button(label="◀️", style=discord.ButtonStyle.gray, custom_id="nav_prev"))
-            self.add_item(discord.ui.Button(label="▶️", style=discord.ButtonStyle.gray, custom_id="nav_next"))
-            self.add_item(discord.ui.Button(label="⏭️", style=discord.ButtonStyle.gray, custom_id="nav_last"))
+            discord.ui.Button(label="⏮️", style=discord.ButtonStyle.gray, custom_id="nav_first"),
+            discord.ui.Button(label="◀️", style=discord.ButtonStyle.gray, custom_id="nav_prev"),
+            discord.ui.Button(label="▶️", style=discord.ButtonStyle.gray, custom_id="nav_next"),
+            discord.ui.Button(label="⏭️", style=discord.ButtonStyle.gray, custom_id="nav_last"),
        ]
         for b in nav_buttons:
             self.add_item(b)     
