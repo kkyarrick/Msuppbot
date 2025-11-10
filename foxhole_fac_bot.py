@@ -293,10 +293,11 @@ class DashboardPaginator(discord.ui.View):
         # tunnel buttons for visible subset
         start = self.page * self.per_page
         end = start + self.per_page
+        tunnels_per_row = 5
         for name, _ in self.tunnels[start:end]:
             # use your existing TunnelButton class
             button = TunnelButton(name)
-            button.row = 1  # Force them to second row
+            button.row = 1 + (i // tunnels_per_row)
             self.add_item(button)
 
     # -----------------------------------------
