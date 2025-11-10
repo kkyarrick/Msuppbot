@@ -618,7 +618,7 @@ class SingleOrderView(discord.ui.View):
         await interaction.followup.send(f"🛠 Order **#{self.order_id}** claimed successfully.", ephemeral=True)
 
     @discord.ui.button(label="Update Status", style=discord.ButtonStyle.green)
-@discord.ui.button(label="Update Status", style=discord.ButtonStyle.green)
+    @discord.ui.button(label="Update Status", style=discord.ButtonStyle.green)
 async def update_button(self, interaction: discord.Interaction, button: discord.ui.Button):
     if not has_authorized_role(interaction.user):
         await interaction.response.send_message("🚫 Unauthorized.", ephemeral=True)
