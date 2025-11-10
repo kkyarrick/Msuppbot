@@ -294,7 +294,7 @@ class DashboardPaginator(discord.ui.View):
         start = self.page * self.per_page
         end = start + self.per_page
         tunnels_per_row = 5
-        for i, (name, _) in enumerate )self.tunnels[start:end]):
+        for i, (name, _) in enumerate(self.tunnels[start:end]):
             # use your existing TunnelButton class
             button = TunnelButton(name)
             button.row = 1 + (i // tunnels_per_row)
