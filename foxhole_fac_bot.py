@@ -687,6 +687,13 @@ class OrderButton(discord.ui.Button):
         if not order:
             await interaction.response.send_message(f"❌ Order **#{self.order_id}** not found.", ephemeral=True)
             return
+            
+        # Calculate how long ago the order was created
+        created_time = datetime.fromisoformat(order["timestamps"]["created"])
+        elapsed = datetime.now(timezone.utc) - created_time
+        hours_ago = int(elapsed.total_seconds() // 3600)
+        minutes_ago = int((elapsed.total_seconds() % 3600) // 60)
+        time_str = f"{hours_ago}h {minutes_ago}m ago" if hours_ago > 0 else f"{minutes_ago}m ago"
 
         embed = discord.Embed(
             title=f"🧾 Order #{self.order_id}: {order['item']} x{order['quantity']}",
@@ -694,8 +701,10 @@ class OrderButton(discord.ui.Button):
             description=(
                 f"**Priority:** {order['priority']}\n"
                 f"**Status:** {order['status']}\n"
+                f"**Location:** {order.get('location', 'Unknown')}\n"
                 f"**Requested by:** <@{order['requested_by']}>\n"
-                f"**Claimed by:** {('<@' + order['claimed_by'] + '>') if order['claimed_by'] else '—'}"
+                f"**Claimed by:** {('<@' + order['claimed_by'] + '>') if order['claimed_by'] else '—'}\n"
+                f"**Placed:** {time_str}"
             ),
             timestamp=datetime.now(timezone.utc)
         )
@@ -1215,6 +1224,7 @@ async def order_create(inter: discord.Interaction, item: str, quantity: int, pri
         "status": "Order Placed",
         "requested_by": str(inter.user.id),
         "claimed_by": None,
+        "location": location,
         "timestamps": {"created": datetime.now(timezone.utc).isoformat()},
     }
 
@@ -1222,10 +1232,10 @@ async def order_create(inter: discord.Interaction, item: str, quantity: int, pri
 
     await log_action(
         inter.guild,
-        f"{inter.user.display_name} placed new order **#{order_id}** — {item} x{quantity} ({priority})."
+        f"{inter.user.display_name} placed new order **#{order_id}** — {item} x{quantity} ({priority}) @ {location}."
     )
 
-    await inter.followup.send(f"🧾 Order **#{order_id}** for **{item} x{quantity}** created successfully.", ephemeral=True)
+    await inter.followup.send(f"🧾 Order **#{order_id}** for **{item} x{quantity}** created successfully at **{location}**.", ephemeral=True)
 
 # ------------------------------------------------------------
 # Claim Order
