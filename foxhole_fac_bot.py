@@ -624,7 +624,7 @@ class SingleOrderView(discord.ui.View):
             await interaction.response.send_message("🚫 Unauthorized.", ephemeral=True)
             return
 
-    await interaction.response.send_message(
+        await interaction.response.send_message(
         "📝 Select a new status from the dropdown below:",
         view=OrderStatusSelectView(self.order_id),
         ephemeral=True
