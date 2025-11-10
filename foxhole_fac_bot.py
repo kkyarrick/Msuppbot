@@ -580,7 +580,7 @@ class OrderStatusSelect(discord.ui.Select):
         await refresh_order_dashboard(interaction.guild)
 
         await interaction.response.send_message(
-            f"✅ Order **#{order_id}** updated to **{new_status}**.",
+            f"✅ Order **#{self.order_id}** updated to **{new_status}**.",
             ephemeral=True
         )
 
