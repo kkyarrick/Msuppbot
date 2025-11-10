@@ -619,10 +619,10 @@ class SingleOrderView(discord.ui.View):
 
     @discord.ui.button(label="Update Status", style=discord.ButtonStyle.green)
     @discord.ui.button(label="Update Status", style=discord.ButtonStyle.green)
-async def update_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-    if not has_authorized_role(interaction.user):
-        await interaction.response.send_message("🚫 Unauthorized.", ephemeral=True)
-        return
+    async def update_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not has_authorized_role(interaction.user):
+            await interaction.response.send_message("🚫 Unauthorized.", ephemeral=True)
+            return
 
     await interaction.response.send_message(
         "📝 Select a new status from the dropdown below:",
