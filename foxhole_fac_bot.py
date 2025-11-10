@@ -282,10 +282,10 @@ class DashboardPaginator(discord.ui.View):
 
         # navigation buttons
         nav_buttons = [
-            discord.ui.Button(label="⏮️", style=discord.ButtonStyle.gray, custom_id="nav_first"),
-            discord.ui.Button(label="◀️", style=discord.ButtonStyle.gray, custom_id="nav_prev"),
-            discord.ui.Button(label="▶️", style=discord.ButtonStyle.gray, custom_id="nav_next"),
-            discord.ui.Button(label="⏭️", style=discord.ButtonStyle.gray, custom_id="nav_last"),
+            discord.ui.Button(label="⏮️", style=discord.ButtonStyle.gray, custom_id="nav_first", row=0),
+            discord.ui.Button(label="◀️", style=discord.ButtonStyle.gray, custom_id="nav_prev", row=0),
+            discord.ui.Button(label="▶️", style=discord.ButtonStyle.gray, custom_id="nav_next", row=0),
+            discord.ui.Button(label="⏭️", style=discord.ButtonStyle.gray, custom_id="nav_last", row=0),
        ]
         for b in nav_buttons:
             self.add_item(b)     
@@ -295,6 +295,7 @@ class DashboardPaginator(discord.ui.View):
         end = start + self.per_page
         for name, _ in self.tunnels[start:end]:
             # use your existing TunnelButton class
+            button.row = 1  # Force them to second row
             self.add_item(TunnelButton(name))
 
     # -----------------------------------------
