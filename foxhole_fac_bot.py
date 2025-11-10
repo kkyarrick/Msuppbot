@@ -743,19 +743,27 @@ def build_clickable_order_dashboard():
         embed.description = "No active orders. Use `/order_create` to add one."
         return embed
 
-    header = "**ID | Item | Qty | Status | Priority | Claimed By**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        # Header with column names
+    header = (
+        "`ID  | Item (xQty)         | Priority | Status              | Claimed By`\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    )
+
     lines = []
     for oid, o in orders_data["orders"].items():
-        status = o["status"]
-        priority = o.get("priority", "Normal")
-        item = o["item"]
+        item = o["item"][:15]  # shorten if long
         qty = o["quantity"]
-        claimed = "-"
-        if o.get("claimed_by"):
-            claimed = f"<@{o['claimed_by']}>"
+        priority = o.get("priority", "Normal")
+        status = o["status"][:18]  # trim long status names
 
+        # Emojis for priority
         priority_icon = {"High": "🔴", "Normal": "🟡", "Low": "🟢"}.get(priority, "🟢")
-        lines.append(f"**#{oid}** | {item} | {qty} | {status} | {priority_icon} {priority} | {claimed}")
+
+        claimed = f"<@{o['claimed_by']}>" if o.get("claimed_by") else "—"
+
+        # Format the row — use fixed-width style
+        line = f"`#{oid:<3}| {item:<18}x{qty:<4}| {priority_icon} {priority:<7}| {status:<18}| {claimed}`"
+        lines.append(line)
 
     embed.description = f"{header}\n" + "\n".join(lines)
     embed.set_footer(text="💡 Click an Order ID below to manage it.")
