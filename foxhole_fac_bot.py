@@ -297,7 +297,7 @@ class DashboardPaginator(discord.ui.View):
             # use your existing TunnelButton class
             button = TunnelButton(name)
             button.row = 1  # Force them to second row
-            self.add_item(Button)
+            self.add_item(button)
 
     # -----------------------------------------
     # Handle navigation click manually
