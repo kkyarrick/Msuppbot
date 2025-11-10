@@ -544,45 +544,50 @@ async def before_refresh_orders_loop():
 # INTERACTIVE ORDER DASHBOARD (CLICKABLE)
 # ============================================================
 
-class OrderStatusModal(discord.ui.Modal, title="Update Order Status"):
+class OrderStatusSelect(discord.ui.Select):
     def __init__(self, order_id: str):
-        super().__init__(title=f"Update Order #{order_id}")
         self.order_id = order_id
-        self.status_input = discord.ui.TextInput(
-            label="New Status",
-            placeholder="e.g. In Progress, Ready for Collection, Complete",
-            required=True
-        )
-        self.add_item(self.status_input)
 
-    async def on_submit(self, interaction: discord.Interaction):
-        order_id = self.order_id
-        new_status = self.status_input.value.strip()
-
-        valid_statuses = [
-            "Order Placed", "Order Claimed", "Order Started",
-            "In Progress", "Ready for Collection", "Complete"
+        options = [
+            discord.SelectOption(label="Order Placed", emoji="📦"),
+            discord.SelectOption(label="Order Claimed", emoji="🧰"),
+            discord.SelectOption(label="Order Started", emoji="⚙️"),
+            discord.SelectOption(label="In Progress", emoji="🚧"),
+            discord.SelectOption(label="Ready for Collection", emoji="📦"),
+            discord.SelectOption(label="Complete", emoji="✅")
         ]
-        if new_status not in valid_statuses:
-            await interaction.response.send_message(
-                f"⚠️ Invalid status. Choose one of: {', '.join(valid_statuses)}",
-                ephemeral=True
-            )
-            return
 
-        order = orders_data["orders"].get(order_id)
+        super().__init__(
+            placeholder="Select new order status...",
+            min_values=1,
+            max_values=1,
+            options=options
+        )
+
+   async def callback(self, interaction: discord.Interaction):
+        new_status = self.values[0]
+        order = orders_data["orders"].get(self.order_id)
+
         if not order:
-            await interaction.response.send_message(f"❌ Order #{order_id} not found.", ephemeral=True)
+            await interaction.response.send_message(f"❌ Order #{self.order_id} not found.", ephemeral=True)
             return
 
         order["status"] = new_status
         order["timestamps"]["last_update"] = datetime.now(timezone.utc).isoformat()
         save_orders()
 
-        await log_action(interaction.guild, f"{interaction.user.display_name} updated order **#{order_id}** → **{new_status}**.")
+        await log_action(interaction.guild, f"{interaction.user.display_name} updated order **#{self.order_id}** → **{new_status}**.")
         await refresh_order_dashboard(interaction.guild)
-        await interaction.response.send_message(f"✅ Order **#{order_id}** updated to **{new_status}**.", ephemeral=True)
 
+        await interaction.response.send_message(
+            f"✅ Order **#{order_id}** updated to **{new_status}**.",
+            ephemeral=True
+        )
+
+class OrderStatusSelectView(discord.ui.View):
+    def __init__(self, order_id: str):
+        super().__init__(timeout=60)
+        self.add_item(OrderStatusSelect(order_id))
 
 class SingleOrderView(discord.ui.View):
     """Interactive buttons for a single order."""
@@ -613,13 +618,17 @@ class SingleOrderView(discord.ui.View):
         await interaction.followup.send(f"🛠 Order **#{self.order_id}** claimed successfully.", ephemeral=True)
 
     @discord.ui.button(label="Update Status", style=discord.ButtonStyle.green)
-    async def update_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Do NOT defer here because we'll open a modal
-        if not has_authorized_role(interaction.user):
-            await interaction.response.send_message("🚫 Unauthorized.", ephemeral=True)
-            return
-        modal = OrderStatusModal(self.order_id)
-        await interaction.response.send_modal(modal)
+@discord.ui.button(label="Update Status", style=discord.ButtonStyle.green)
+async def update_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    if not has_authorized_role(interaction.user):
+        await interaction.response.send_message("🚫 Unauthorized.", ephemeral=True)
+        return
+
+    await interaction.response.send_message(
+        "📝 Select a new status from the dropdown below:",
+        view=OrderStatusSelectView(self.order_id),
+        ephemeral=True
+    )
 
     @discord.ui.button(label="Mark Complete", style=discord.ButtonStyle.gray)
     async def complete_button(self, interaction: discord.Interaction, button: discord.ui.Button):
