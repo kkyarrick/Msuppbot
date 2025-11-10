@@ -1236,6 +1236,7 @@ async def order_create(inter: discord.Interaction, item: str, quantity: int, pri
     )
 
     await inter.followup.send(f"🧾 Order **#{order_id}** for **{item} x{quantity}** created successfully at **{location}**.", ephemeral=True)
+    await refresh_order_dashboard(interaction.guild)
 
 # ------------------------------------------------------------
 # Claim Order
