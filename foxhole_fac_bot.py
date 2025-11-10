@@ -281,10 +281,14 @@ class DashboardPaginator(discord.ui.View):
         self.clear_items()
 
         # navigation buttons
+        nav_buttons = [
         self.add_item(discord.ui.Button(label="⏮️", style=discord.ButtonStyle.gray, custom_id="nav_first"))
         self.add_item(discord.ui.Button(label="◀️", style=discord.ButtonStyle.gray, custom_id="nav_prev"))
         self.add_item(discord.ui.Button(label="▶️", style=discord.ButtonStyle.gray, custom_id="nav_next"))
         self.add_item(discord.ui.Button(label="⏭️", style=discord.ButtonStyle.gray, custom_id="nav_last"))
+       ]
+        for b in nav_buttons:
+        self.add_item(b)     
 
         # tunnel buttons for visible subset
         start = self.page * self.per_page
@@ -732,7 +736,7 @@ class OrderDashboardView(discord.ui.View):
 # BUILD EMBED (Updated to show clickable buttons)
 # ============================================================
 def build_clickable_order_dashboard():
-    """Build the order dashboard embed."""
+    """Clean, modern order dashboard to match tunnel aesthetic."""
     embed = discord.Embed(
         title="📦 Foxhole FAC Orders Dashboard",
         color=discord.Color.blurple(),
@@ -743,29 +747,30 @@ def build_clickable_order_dashboard():
         embed.description = "No active orders. Use `/order_create` to add one."
         return embed
 
-        # Header with column names
-    header = (
-        "`ID  | Item (xQty)         | Priority | Status              | Claimed By`\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    )
-
     lines = []
     for oid, o in orders_data["orders"].items():
-        item = o["item"][:15]  # shorten if long
+        item = o["item"]
         qty = o["quantity"]
         priority = o.get("priority", "Normal")
-        status = o["status"][:18]  # trim long status names
-
-        # Emojis for priority
-        priority_icon = {"High": "🔴", "Normal": "🟡", "Low": "🟢"}.get(priority, "🟢")
-
+        status = o["status"]
         claimed = f"<@{o['claimed_by']}>" if o.get("claimed_by") else "—"
 
-        # Format the row — use fixed-width style
-        line = f"`#{oid:<3}| {item:<18}x{qty:<4}| {priority_icon} {priority:<7}| {status:<18}| {claimed}`"
-        lines.append(line)
+        priority_icon = {"High": "🔴", "Normal": "🟡", "Low": "🟢"}.get(priority, "🟢")
+        status_icon = {
+            "Order Placed": "🕓",
+            "Order Claimed": "🟦",
+            "Order Started": "🧰",
+            "In Progress": "⚙️",
+            "Ready for Collection": "📦",
+            "Complete": "✅"
+        }.get(status, "📋")
 
-    embed.description = f"{header}\n" + "\n".join(lines)
+        lines.append(
+            f"**#{oid}** {item} x{qty} | {priority_icon} **{priority}** | "
+            f"{status_icon} {status} | 👤 {claimed}"
+        )
+
+    embed.description = "\n".join(lines)
     embed.set_footer(text="💡 Click an Order ID below to manage it.")
     return embed
 
