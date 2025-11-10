@@ -1207,7 +1207,7 @@ def has_authorized_role(member: discord.Member):
 # Create Order
 # ------------------------------------------------------------
 @bot.tree.command(name="order_create", description="Create a new order request.")
-async def order_create(inter: discord.Interaction, item: str, quantity: int, priority: str = "Normal"):
+async def order_create(inter: discord.Interaction, item: str, quantity: int, priority: str = "Normal", location: str = "Unknown"):
     await inter.response.defer(ephemeral=True)
 
     if not has_authorized_role(inter.user):
