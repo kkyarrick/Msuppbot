@@ -190,24 +190,15 @@ class StackSubmitModal(discord.ui.Modal, title="Submit Stacks"):
         save_data(DATA_FILE, tunnels)
         save_data(USER_FILE, users)
 
-
-        await log_action(
-            interaction.guild,
-            interaction.user,
-            "added supplies",
-            target_name=name,
-            amount=amount
-        )
-        
         log_contribution(interaction.user.id, "submit stacks", amount, self.tunnel_name)
         await log_action(
             interaction.guild,
             interaction.user,
-            "submitted stacks",
-            target_name=self.tunnel_name,
+            "added supplies",
+            target_name=self.tunnel_name,,
             amount=amount
         )
-
+        
         await refresh_(interaction.guild)
         await interaction.response.send_message(
             f"🪣 Submitted {amount} supplies ({stacks} stacks) to **{self.tunnel_name}**.",
@@ -974,15 +965,6 @@ async def addsupplies(interaction: discord.Interaction, name: str, amount: int):
     save_data(DATA_FILE, tunnels)
     save_data(USER_FILE, users)
     await refresh_dashboard(interaction.guild)
-
-    # ✅ Correct logging call
-    await log_action(
-        interaction.guild,
-        interaction.user,
-        "added supplies",
-        target_name=name,
-        amount=amount
-    )
 
     log_contribution(interaction.user.id, "add supplies", amount, name)
     await log_action(
