@@ -13,6 +13,7 @@ DATA_FILE = "tunnels.json"
 USER_FILE = "users.json"
 DASH_FILE = "dashboard.json"
 ORDERS_FILE = "orders.json"
+CONTRIB_FILE = "contributions.json"
 SUPPLY_INCREMENT = 1500
 
 intents = discord.Intents.default()
@@ -30,6 +31,7 @@ for file, default in [
     (USER_FILE, {}),
     (DASH_FILE, {}),
     (ORDERS_FILE, {"next_id": 1, "orders": {}})
+    
 ]:
     if not os.path.exists(file):
         save_data(file, default)
@@ -62,6 +64,7 @@ def load_orders():
 tunnels = load_data(DATA_FILE, {})
 users = load_data(USER_FILE, {})
 dashboard_info = load_data(DASH_FILE, {})  # {guild_id: {"channel": id, "message": id}}
+contributions = load_data(CONTRIB_FILE, {})
 
 def catch_up_tunnels():
     now = datetime.now(timezone.utc)
@@ -139,6 +142,31 @@ async def log_action(
     except Exception as e:
         print(f"[LOGGING ERROR] {e}")
 
+def log_contribution(user_id: str, action: str, amount: int | float = 0, tunnel: str | None = None):
+    """Record player contributions for analytics."""
+    user_id = str(user_id)
+    now = datetime.now(timezone.utc).isoformat()
+
+    if user_id not in contributions:
+        contributions[user_id] = {
+            "total_supplies": 0,
+            "actions": []
+        }
+
+    # Add to running totals if relevant
+    if action.lower() in ["add supplies", "submit stacks", "1500 (done)"]:
+        contributions[user_id]["total_supplies"] += amount
+
+    # Log each event
+    contributions[user_id]["actions"].append({
+        "timestamp": now,
+        "action": action,
+        "tunnel": tunnel,
+        "amount": amount
+    })
+
+    save_data(CONTRIB_FILE, contributions)
+
 class StackSubmitModal(discord.ui.Modal, title="Submit Stacks"):
     tunnel_name: str
 
@@ -161,6 +189,24 @@ class StackSubmitModal(discord.ui.Modal, title="Submit Stacks"):
         users[user_id] = users.get(user_id, 0) + amount
         save_data(DATA_FILE, tunnels)
         save_data(USER_FILE, users)
+
+
+        await log_action(
+            interaction.guild,
+            interaction.user,
+            "added supplies",
+            target_name=name,
+            amount=amount
+        )
+        
+        log_contribution(interaction.user.id, "submit stacks", amount, self.tunnel_name)
+        await log_action(
+            interaction.guild,
+            interaction.user,
+            "submitted stacks",
+            target_name=self.tunnel_name,
+            amount=amount
+        )
 
         await refresh_(interaction.guild)
         await interaction.response.send_message(
@@ -938,6 +984,15 @@ async def addsupplies(interaction: discord.Interaction, name: str, amount: int):
         amount=amount
     )
 
+    log_contribution(interaction.user.id, "add supplies", amount, name)
+    await log_action(
+        interaction.guild,
+        interaction.user,
+        "added supplies",
+        target_name=name,
+        amount=amount
+    )
+
     await interaction.followup.send(f"🪣 Added {amount:,} supplies to **{name}**.", ephemeral=True)
 
 @bot.tree.command(name="updatetunnel", description="Update tunnel values without affecting leaderboard.")
@@ -1048,6 +1103,31 @@ async def leaderboard(interaction: discord.Interaction):
 
     except Exception as e:
         await interaction.followup.send(f"⚠️ Error showing leaderboard: {e}", ephemeral=True)
+
+@bot.tree.command(name="stats", description="View your personal contribution stats.")
+async def stats(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    uid = str(interaction.user.id)
+
+    if uid not in contributions:
+        await interaction.followup.send("📊 No contribution data found yet.", ephemeral=True)
+        return
+
+    data = contributions[uid]
+    total = data.get("total_supplies", 0)
+    actions = data.get("actions", [])
+    last_action = actions[-1]["timestamp"] if actions else "N/A"
+
+    embed = discord.Embed(
+        title=f"📈 Contribution Stats — {interaction.user.display_name}",
+        color=discord.Color.teal()
+    )
+    embed.add_field(name="Total Supplies Added", value=f"**{total:,}**", inline=False)
+    embed.add_field(name="Total Actions", value=f"**{len(actions)}**", inline=False)
+    embed.add_field(name="Last Action", value=f"`{last_action}`", inline=False)
+
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
 
 @bot.tree.command(name="deletetunnel", description="Officer-only: Delete a tunnel from the dashboard.")
 async def deletetunnel(interaction: discord.Interaction, name: str):
