@@ -227,6 +227,15 @@ class TunnelButton(Button):
             users[user_id] = users.get(user_id, 0) + SUPPLY_INCREMENT
             save_data(DATA_FILE, tunnels)
             save_data(USER_FILE, users)
+            # 🧾 Add contribution and action logging
+            log_contribution(inter.user.id, "1500 (Done)", SUPPLY_INCREMENT, self.tunnel)
+            await log_action(
+                interaction.guild,
+                interaction.user,
+                "added supplies",
+                target_name=self.tunnel,
+                amount=SUPPLY_INCREMENT
+            )
             await refresh_dashboard(interaction.guild)
             await interaction.response.edit_message(
                 content=f"🪣 Added {SUPPLY_INCREMENT} supplies to **{self.tunnel}**!",
