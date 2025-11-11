@@ -871,7 +871,7 @@ async def on_ready():
 
 @bot.tree.command(name="addtunnel", description="Add a new tunnel.")
 async def addtunnel(interaction: discord.Interaction, name: str, total_supplies: int, usage_rate: int, location: str = "Unknown"):
-    await interaction.response.defer()
+    await interaction.response.defer(ephemeral=True)
     tunnels[name] = {
         "total_supplies": total_supplies,
         "usage_rate": usage_rate,
