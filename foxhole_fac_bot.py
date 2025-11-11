@@ -195,11 +195,11 @@ class StackSubmitModal(discord.ui.Modal, title="Submit Stacks"):
             interaction.guild,
             interaction.user,
             "added supplies",
-            target_name=self.tunnel_name,,
+            target_name=self.tunnel_name,
             amount=amount
         )
         
-        await refresh_(interaction.guild)
+        await refresh_dashboard(interaction.guild)
         await interaction.response.send_message(
             f"🪣 Submitted {amount} supplies ({stacks} stacks) to **{self.tunnel_name}**.",
             ephemeral=True
