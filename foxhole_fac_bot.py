@@ -1287,7 +1287,7 @@ async def order_create(interaction: discord.Interaction, item: str, quantity: in
 
     await log_action(
         interaction.guild,
-        interaction.user
+        interaction.user,
         "placed new order"
         target_name=f"#{order_id}",
         amount=quantity,
