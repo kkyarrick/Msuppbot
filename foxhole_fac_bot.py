@@ -674,7 +674,14 @@ class SingleOrderView(discord.ui.View):
         order["timestamps"]["completed"] = datetime.now(timezone.utc).isoformat()
         save_orders()
 
-        await log_action(interaction.guild, f"{interaction.user.display_name} marked order **#{self.order_id}** complete.")
+        await log_action(
+            interaction.guild,
+            interaction.user,
+            "marked order complete",
+            target_name=f"**#{self.order_id}**",
+            extra=f"{order['item']} x{order['quantity']}"
+        )
+        
         await refresh_order_dashboard(interaction.guild)
         await interaction.followup.send(f"✅ Order **#{self.order_id}** marked complete.", ephemeral=True)
 
@@ -1319,7 +1326,13 @@ async def order_claim(interaction: discord.Interaction, order_id: int):
     order["timestamps"]["claimed"] = datetime.now(timezone.utc).isoformat()
     save_orders()
 
-    await log_action(interaction.guild, f"{interaction.user.display_name} claimed order **#{order_id}** ({order['item']} x{order['quantity']}).")
+    await log_action(
+        interaction.guild,
+        interaction.user,
+        "claimed order",
+        target_name=f"**#{order_id}**",
+        extra=f"{order['item']} x{order['quantity']}"
+    )
     await interaction.followup.send(f"🛠 Order **#{order_id}** claimed successfully.", ephemeral=True)
 
 # ------------------------------------------------------------
