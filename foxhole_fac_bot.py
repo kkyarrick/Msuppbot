@@ -228,7 +228,7 @@ class TunnelButton(Button):
             save_data(DATA_FILE, tunnels)
             save_data(USER_FILE, users)
             # 🧾 Add contribution and action logging
-            log_contribution(inter.user.id, "1500 (Done)", SUPPLY_INCREMENT, self.tunnel)
+            log_contribution(interaction.user.id, "1500 (Done)", SUPPLY_INCREMENT, self.tunnel)
             await log_action(
                 interaction.guild,
                 interaction.user,
