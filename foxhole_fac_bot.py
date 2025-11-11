@@ -888,8 +888,16 @@ async def addtunnel(interaction: discord.Interaction, name: str, total_supplies:
         dashboard_info[guild_id] = {"channel": msg.channel.id, "message": msg.id}
         save_data(DASH_FILE, dashboard_info)
     else:
-        await log_action(interaction.guild, f"{interaction.user.display_name} added new tunnel **{name}** "
-                              f"({total_supplies:,} supplies, {usage_rate}/hr) — Location: {location}.")
+        await log_action(
+            interaction.guild,
+            interaction.user,
+            "added new tunnel",
+            target_name=name,
+            amount=total_supplies,
+            location=location,
+            extra=f"Usage: {usage_rate}/hr"
+        )
+
         await refresh_dashboard(interaction.guild)
         await interaction.followup.send(f"✅ Tunnel **{name}** added and dashboard updated.", ephemeral=True)
 
@@ -912,7 +920,10 @@ async def addsupplies(interaction: discord.Interaction, name: str, amount: int):
     # ✅ Correct logging call
     await log_action(
         interaction.guild,
-        f"{interaction.user.display_name} added {amount:,} supplies to **{name}**."
+        interaction.user,
+        "added supplies",
+        target_name=name,
+        amount=amount
     )
 
     await interaction.followup.send(f"🪣 Added {amount:,} supplies to **{name}**.", ephemeral=True)
@@ -949,9 +960,14 @@ async def updatetunnel(
 
     await log_action(
         interaction.guild,
-        f"{interaction.user.display_name} updated **{name}** "
-        f"({current_loc}) → {total_supplies:,} supplies @ {current_rate}/hr."
+        interaction.user,
+        "updated tunnel",
+        target_name=name,
+        amount=tunnels[name]["total_supplies"],
+        location=tunnels[name]["location"],
+        extra=f"Rate: {tunnels[name]['usage_rate']}/hr"
     )
+
 
     await interaction.followup.send(f"✅ Tunnel **{name}** updated successfully.", ephemeral=True)
 
@@ -1040,8 +1056,11 @@ async def deletetunnel(interaction: discord.Interaction, name: str):
 
     await log_action(
         interaction.guild,
-        f"{interaction.user.display_name} deleted tunnel **{name}**."
+        interaction.user,
+        "deleted tunnel",
+        target_name=name
     )
+
 
     await interaction.followup.send(f"🗑️ Tunnel **{name}** deleted successfully and dashboard updated.", ephemeral=True)
 
@@ -1268,7 +1287,11 @@ async def order_create(interaction: discord.Interaction, item: str, quantity: in
 
     await log_action(
         interaction.guild,
-        f"{interaction.user.display_name} placed new order **#{order_id}** — {item} x{quantity} ({priority}) @ {location}."
+        interaction.user
+        "placed new order"
+        target_name=f"#{order_id}",
+        amount=quantity,
+        extra=f"{item} ({priority})"
     )
 
     await interaction.followup.send(f"🧾 Order **#{order_id}** for **{item} x{quantity}** created successfully at **{location}**.", ephemeral=True)
