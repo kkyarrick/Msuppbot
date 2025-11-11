@@ -88,23 +88,28 @@ def catch_up_tunnels():
 # DATA LOGGING
 # ============================================================
 
-async def log_action(guild: discord.Guild, message: str):
-    """Posts log messages to the FAC log thread for auditing."""
+async def log_action(
+    guild: discord.Guild,
+    actor: discord.User | discord.Member,
+    action_type: str,
+    target_name: str = None,
+    amount: int | float | None = None,
+    location: str | None = None,
+    extra: str = None
+):
+    """Post structured audit log entries to the FAC log thread."""
     try:
         guild_id = str(guild.id)
         log_channel_id = dashboard_info.get(guild_id, {}).get("log_channel")
-
         if not log_channel_id:
-            return  # Logging not configured yet
+            return
 
         log_channel = guild.get_channel(log_channel_id)
         if not log_channel:
             return
 
-        # Look for a thread named "FAC Logs"
+        # Look for or create the FAC Logs thread
         thread = discord.utils.get(log_channel.threads, name="FAC Logs")
-
-        # Create the thread if it doesn’t exist
         if not thread:
             thread = await log_channel.create_thread(
                 name="FAC Logs",
@@ -112,12 +117,27 @@ async def log_action(guild: discord.Guild, message: str):
             )
             await thread.send("🧾 **FAC Audit Log Thread Created** — all actions will be recorded here.")
 
+        # Build readable structured message
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        await thread.send(f"🕒 `{timestamp}` — {message}")
+        message_parts = [
+            f"🕒 `{timestamp}`",
+            f"👤 **{actor.display_name}**",
+            f"🧭 *{action_type}*"
+        ]
+        if target_name:
+            message_parts.append(f"→ **{target_name}**")
+        if amount is not None:
+            message_parts.append(f"📦 `{amount:,}` units")
+        if location:
+            message_parts.append(f"📍 `{location}`")
+        if extra:
+            message_parts.append(f"📝 {extra}")
+
+        log_message = " | ".join(message_parts)
+        await thread.send(log_message)
 
     except Exception as e:
         print(f"[LOGGING ERROR] {e}")
-
 
 class StackSubmitModal(discord.ui.Modal, title="Submit Stacks"):
     tunnel_name: str
@@ -293,7 +313,7 @@ class DashboardPaginator(discord.ui.View):
         # tunnel buttons for visible subset
         start = self.page * self.per_page
         end = start + self.per_page
-        tunnels_per_row = 5
+        tunnels_per_row = 4
         for i, (name, _) in enumerate(self.tunnels[start:end]):
             # use your existing TunnelButton class
             button = TunnelButton(name)
