@@ -701,7 +701,13 @@ class SingleOrderView(discord.ui.View):
         deleted = orders_data["orders"].pop(self.order_id)
         save_orders()
 
-        await log_action(interaction.guild, f"{interaction.user.display_name} deleted order **#{self.order_id}** ({deleted['item']} x{deleted['quantity']}).")
+        await log_action(
+            interaction.guild,
+            interaction.user,
+            "Deleted order",
+            target_name=f"**#{self.order_id}**",
+            extra=f"{order['item']} x{order['quantity']}"
+        )
         await refresh_order_dashboard(interaction.guild)
         await interaction.followup.send(f"🗑️ Order **#{self.order_id}** deleted.", ephemeral=True)
 
