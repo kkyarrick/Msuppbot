@@ -65,6 +65,7 @@ tunnels = load_data(DATA_FILE, {})
 users = load_data(USER_FILE, {})
 dashboard_info = load_data(DASH_FILE, {})  # {guild_id: {"channel": id, "message": id}}
 contributions = load_data(CONTRIB_FILE, {})
+log_buffer = {}
 
 def catch_up_tunnels():
     now = datetime.now(timezone.utc)
@@ -91,16 +92,8 @@ def catch_up_tunnels():
 # DATA LOGGING
 # ============================================================
 
-async def log_action(
-    guild: discord.Guild,
-    actor: discord.User | discord.Member,
-    action_type: str,
-    target_name: str = None,
-    amount: int | float | None = None,
-    location: str | None = None,
-    extra: str = None
-):
-    """Post structured audit log entries to the FAC log thread."""
+async def log_action(guild: discord.Guild, user: discord.User, action: str, target_name: str = None, amount: int = 0):
+    """Log user actions with smart batching and real-time flushing when switching tunnels."""
     try:
         guild_id = str(guild.id)
         log_channel_id = dashboard_info.get(guild_id, {}).get("log_channel")
@@ -111,7 +104,7 @@ async def log_action(
         if not log_channel:
             return
 
-        # Look for or create the FAC Logs thread
+        # Ensure FAC Logs thread exists
         thread = discord.utils.get(log_channel.threads, name="FAC Logs")
         if not thread:
             thread = await log_channel.create_thread(
@@ -120,28 +113,45 @@ async def log_action(
             )
             await thread.send("🧾 **FAC Audit Log Thread Created** — all actions will be recorded here.")
 
-        # Build readable structured message
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        message_parts = [
-            f"🕒 `{timestamp}`",
-            f"👤 **{actor.display_name}**",
-            f"🧭 *{action_type}*"
-        ]
-        if target_name:
-            message_parts.append(f"→ **{target_name}**")
-        if amount is not None:
-            message_parts.append(f"📦 `{amount:,}` units")
-        if location:
-            message_parts.append(f"📍 `{location}`")
-        if extra:
-            message_parts.append(f"📝 {extra}")
+        now = datetime.now(timezone.utc)
+        date_key = now.strftime("%Y-%m-%d")
 
-        log_message = " | ".join(message_parts)
-        await thread.send(log_message)
+        # Define key by user & date (not tunnel yet, so we can check changes)
+        key_prefix = (guild.id, user.id, date_key)
+
+        # Find if the user has an existing record for today
+        existing_key = next((k for k in log_buffer if k[:3] == key_prefix), None)
+
+        # If switching to a different tunnel, flush immediately before overwriting
+        if existing_key and existing_key[2] != target_name:
+            prev_data = log_buffer.pop(existing_key)
+            prev_amount = prev_data["amount"]
+            prev_target = existing_key[2]
+            prev_action = prev_data["action"]
+            timestamp = now.strftime("%Y-%m-%d %H:%M:%S UTC")
+
+            await thread.send(
+                f"🧾 `{timestamp}` — {user.display_name} {prev_action} "
+                f"**{prev_amount:,} supplies** total at **{prev_target}** today."
+            )
+
+        # Build the new key for this tunnel
+        key = (guild.id, user.id, target_name, date_key)
+
+        # Supply batching logic
+        if any(word in action.lower() for word in ["supply", "stack", "done", "add"]):
+            if key not in log_buffer:
+                log_buffer[key] = {"amount": 0, "last": now, "action": action}
+            log_buffer[key]["amount"] += amount
+            log_buffer[key]["last"] = now
+        else:
+            # Immediate log for non-supply actions
+            timestamp = now.strftime("%Y-%m-%d %H:%M:%S UTC")
+            await thread.send(f"🕒 `{timestamp}` — {user.display_name} {action} {target_name or ''}")
 
     except Exception as e:
         print(f"[LOGGING ERROR] {e}")
-
+        
 def log_contribution(user_id: str, action: str, amount: int | float = 0, tunnel: str | None = None):
     """Record player contributions for analytics."""
     user_id = str(user_id)
@@ -921,6 +931,7 @@ async def on_ready():
     weekly_leaderboard.start()
     refresh_dashboard_loop.start()
     refresh_orders_loop.start()
+    flush_log_buffer.start()
     bot.add_view(DashboardPaginator(tunnels))
 
 # ============================================================
@@ -1565,6 +1576,50 @@ async def weekly_leaderboard():
         await channel.send(embed=embed)
     users.clear()
     save_data(USER_FILE, users)
+
+@tasks.loop(minutes=5)
+async def flush_log_buffer():
+    """Flush batched logs into FAC log thread every 5 minutes."""
+    if not log_buffer:
+        return
+
+    now = datetime.now(timezone.utc)
+    to_flush = list(log_buffer.items())
+
+    for key, data in to_flush:
+        guild_id, user_id, target_name, date_key = key
+        amount = data["amount"]
+        action = data["action"]
+
+        guild = discord.utils.get(bot.guilds, id=guild_id)
+        if not guild:
+            continue
+
+        log_channel_id = dashboard_info.get(str(guild.id), {}).get("log_channel")
+        if not log_channel_id:
+            continue
+
+        log_channel = guild.get_channel(log_channel_id)
+        if not log_channel:
+            continue
+
+        thread = discord.utils.get(log_channel.threads, name="FAC Logs")
+        if not thread:
+            continue
+
+        user = guild.get_member(user_id) or await bot.fetch_user(user_id)
+        timestamp = now.strftime("%Y-%m-%d %H:%M:%S UTC")
+
+        await thread.send(
+            f"🧾 `{timestamp}` — {user.display_name} {action} **{amount:,} supplies** total at **{target_name}** today."
+        )
+
+        del log_buffer[key]  # clear after posting
+
+@flush_log_buffer.before_loop
+async def before_flush_log_buffer():
+    await bot.wait_until_ready()
+
 
 # ============================================================
 # START
