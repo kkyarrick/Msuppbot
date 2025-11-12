@@ -490,7 +490,7 @@ async def refresh_dashboard(guild: discord.Guild):
         msg = await channel.fetch_message(info["message"])
         paginator = DashboardPaginator(tunnels)
         await msg.edit(embed=paginator.build_page_embed(), view=paginator)
-        print(f"[OK] Refreshed dashboard in {guild.name}")
+        #print(f"[OK] Refreshed dashboard in {guild.name}")
 
     except discord.NotFound:
         # Dashboard message deleted or invalid — recreate
@@ -599,7 +599,7 @@ async def refresh_order_dashboard(guild: discord.Guild):
     try:
         msg = await channel.fetch_message(message_id)
         await msg.edit(embed=build_clickable_order_dashboard(), view=OrderDashboardView())
-        print(f"[OK] Refreshed order dashboard for {guild.name}.")
+        #print(f"[OK] Refreshed order dashboard for {guild.name}.")
     except discord.NotFound:
         # The message was deleted — recreate it
         new_msg = await channel.send(embed=build_clickable_order_dashboard(), view=OrderDashboardView())
