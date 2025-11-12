@@ -92,7 +92,15 @@ def catch_up_tunnels():
 # DATA LOGGING
 # ============================================================
 
-async def log_action(guild: discord.Guild, user: discord.User, action: str, target_name: str = None, amount: int = 0):
+async def log_action(
+    guild: discord.Guild,
+    actor: discord.User | discord.Member,
+    action_type: str,
+    target_name: str = None,
+    amount: int | float | None = None,
+    location: str | None = None,
+    extra: str = None
+):
     """Log user actions with smart batching and real-time flushing when switching tunnels."""
     try:
         guild_id = str(guild.id)
@@ -116,42 +124,54 @@ async def log_action(guild: discord.Guild, user: discord.User, action: str, targ
         now = datetime.now(timezone.utc)
         date_key = now.strftime("%Y-%m-%d")
 
-        # Define key by user & date (not tunnel yet, so we can check changes)
-        key_prefix = (guild.id, user.id, date_key)
+        # Build base key for user+day
+        key_prefix = (guild.id, actor.id, date_key)
 
-        # Find if the user has an existing record for today
+        # Detect any existing batched entry
         existing_key = next((k for k in log_buffer if k[:3] == key_prefix), None)
 
-        # If switching to a different tunnel, flush immediately before overwriting
+        # If switching tunnels, flush previous entry first
         if existing_key and existing_key[2] != target_name:
             prev_data = log_buffer.pop(existing_key)
-            prev_amount = prev_data["amount"]
+            prev_amount = prev_data.get("amount", 0)
             prev_target = existing_key[2]
-            prev_action = prev_data["action"]
+            prev_action = prev_data.get("action", "did something")
             timestamp = now.strftime("%Y-%m-%d %H:%M:%S UTC")
 
             await thread.send(
-                f"🧾 `{timestamp}` — {user.display_name} {prev_action} "
+                f"🧾 `{timestamp}` — {actor.display_name} {prev_action} "
                 f"**{prev_amount:,} supplies** total at **{prev_target}** today."
             )
 
-        # Build the new key for this tunnel
-        key = (guild.id, user.id, target_name, date_key)
+        # Build new key for current action
+        key = (guild.id, actor.id, target_name, date_key)
 
-        # Supply batching logic
-        if any(word in action.lower() for word in ["supply", "stack", "done", "add"]):
+        # Check if supply-type action (eligible for batching)
+        if any(word in action_type.lower() for word in ["supply", "stack", "done", "add"]):
             if key not in log_buffer:
-                log_buffer[key] = {"amount": 0, "last": now, "action": action}
-            log_buffer[key]["amount"] += amount
+                log_buffer[key] = {"amount": 0, "last": now, "action": action_type}
+
+            if amount:
+                log_buffer[key]["amount"] += amount
             log_buffer[key]["last"] = now
+
         else:
-            # Immediate log for non-supply actions
+            # Immediate structured log for non-batchable actions
             timestamp = now.strftime("%Y-%m-%d %H:%M:%S UTC")
-            await thread.send(f"🕒 `{timestamp}` — {user.display_name} {action} {target_name or ''}")
+            line = f"🕒 `{timestamp}` — {actor.display_name} {action_type}"
+
+            if target_name:
+                line += f" **{target_name}**"
+            if location:
+                line += f" at `{location}`"
+            if extra:
+                line += f" ({extra})"
+
+            await thread.send(line)
 
     except Exception as e:
         print(f"[LOGGING ERROR] {e}")
-        
+       
 def log_contribution(user_id: str, action: str, amount: int | float = 0, tunnel: str | None = None):
     """Record player contributions for analytics."""
     user_id = str(user_id)
@@ -165,6 +185,7 @@ def log_contribution(user_id: str, action: str, amount: int | float = 0, tunnel:
 
     # Add to running totals if relevant
     if action.lower() in ["add supplies", "submit stacks", "1500 (done)"]:
+
         contributions[user_id]["total_supplies"] += amount
 
     # Log each event
