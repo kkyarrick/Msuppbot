@@ -591,7 +591,7 @@ async def refresh_order_dashboard(guild: discord.Guild):
 # ------------------------------------------------------------
 @bot.tree.command(name="order_dashboard", description="Show or bind the order management dashboard.")
 async def order_dashboard(interaction: discord.Interaction):
-    await interaction.response.defer()
+    await interaction.response.defer(ephemeral=True)
 
     guild_id = str(interaction.guild_id)
     embed = build_order_dashboard()
@@ -1063,7 +1063,7 @@ async def updatetunnel(
 
 @bot.tree.command(name="dashboard", description="Show or bind the persistent dashboard.")
 async def dashboard(interaction: discord.Interaction):
-    await interaction.response.defer()
+    await interaction.response.defer(ephemeral=True)
     gid = str(interaction.guild_id)
     if gid in dashboard_info:
         await refresh_dashboard(interaction.guild)
