@@ -648,47 +648,71 @@ async def before_refresh_orders_loop():
 # INTERACTIVE ORDER DASHBOARD (CLICKABLE)
 # ============================================================
 
+# ============================================================
+# INTERACTIVE ORDER STATUS DROPDOWN
+# ============================================================
+
 class OrderStatusSelect(discord.ui.Select):
+    """Dropdown to update an order's status directly."""
     def __init__(self, order_id: str):
         self.order_id = order_id
 
         options = [
-            discord.SelectOption(label="Order Placed", emoji="📦"),
-            discord.SelectOption(label="Order Claimed", emoji="🧰"),
-            discord.SelectOption(label="Order Started", emoji="⚙️"),
-            discord.SelectOption(label="In Progress", emoji="🚧"),
-            discord.SelectOption(label="Ready for Collection", emoji="📦"),
-            discord.SelectOption(label="Complete", emoji="✅")
+            discord.SelectOption(label="Order Placed", emoji="📦", description="Order has been placed."),
+            discord.SelectOption(label="Order Claimed", emoji="🧰", description="Order has been claimed."),
+            discord.SelectOption(label="Order Started", emoji="⚙️", description="Work on the order has begun."),
+            discord.SelectOption(label="In Progress", emoji="🚧", description="Order is currently being worked on."),
+            discord.SelectOption(label="Ready for Collection", emoji="📦", description="Order is ready to be picked up."),
+            discord.SelectOption(label="Complete", emoji="✅", description="Order has been completed.")
         ]
 
         super().__init__(
-            placeholder="Select new order status...",
+            placeholder="Select a new order status...",
             min_values=1,
             max_values=1,
-            options=options
+            options=options,
+            custom_id=f"status_select_{order_id}"
         )
 
     async def callback(self, interaction: discord.Interaction):
+        """Handle status updates when a selection is made."""
         new_status = self.values[0]
         order = orders_data["orders"].get(self.order_id)
 
         if not order:
-            await interaction.response.send_message(f"❌ Order #{self.order_id} not found.", ephemeral=True)
+            await interaction.response.send_message(
+                f"❌ Order **#{self.order_id}** not found.",
+                ephemeral=True
+            )
             return
 
+        # Update the order record
+        old_status = order.get("status", "Unknown")
         order["status"] = new_status
         order["timestamps"]["last_update"] = datetime.now(timezone.utc).isoformat()
         save_orders()
 
-        await log_action(interaction.guild, f"{interaction.user.display_name} updated order **#{self.order_id}** → **{new_status}**.")
+        # Log the change
+        await log_action(
+            interaction.guild,
+            interaction.user,
+            "updated order status",
+            target_name=f"#{self.order_id}",
+            extra=f"{order['item']} x{order['quantity']} — {old_status} → {new_status}"
+        )
+
+        # Refresh dashboard view
         await refresh_order_dashboard(interaction.guild)
 
+        # Notify user
         await interaction.response.send_message(
             f"✅ Order **#{self.order_id}** updated to **{new_status}**.",
             ephemeral=True
         )
 
+
 class OrderStatusSelectView(discord.ui.View):
+    """A simple view container for the order status dropdown."""
     def __init__(self, order_id: str):
         super().__init__(timeout=60)
         self.add_item(OrderStatusSelect(order_id))
