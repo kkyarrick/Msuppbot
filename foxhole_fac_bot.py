@@ -472,21 +472,45 @@ def build_dashboard_embed():
     return embed
 
 async def refresh_dashboard(guild: discord.Guild):
-    """Edit the persistent dashboard message if it exists."""
-    if str(guild.id) not in dashboard_info:
+    """Edit or recreate the persistent tunnel dashboard message."""
+    guild_id = str(guild.id)
+    info = dashboard_info.get(guild_id)
+
+    if not info:
+        print(f"[INFO] No dashboard info found for guild {guild.name}")
         return
 
-    info = dashboard_info[str(guild.id)]
-    channel = guild.get_channel(info["channel"])
+    channel = guild.get_channel(info.get("channel"))
     if not channel:
+        print(f"[WARN] Dashboard channel missing for {guild.name}")
         return
 
     try:
+        # Try to edit existing dashboard
         msg = await channel.fetch_message(info["message"])
         paginator = DashboardPaginator(tunnels)
         await msg.edit(embed=paginator.build_page_embed(), view=paginator)
+        print(f"[OK] Refreshed dashboard in {guild.name}")
+
+    except discord.NotFound:
+        # Dashboard message deleted or invalid — recreate
+        paginator = DashboardPaginator(tunnels)
+        new_msg = await channel.send(embed=paginator.build_page_embed(), view=paginator)
+        dashboard_info[guild_id] = {"channel": channel.id, "message": new_msg.id}
+        save_data(DASH_FILE, dashboard_info)
+        print(f"[INFO] Recreated dashboard in {guild.name}")
+
     except Exception as e:
         print(f"[ERROR] Failed to refresh dashboard in {guild.name}: {e}")
+        # Attempt recovery by recreating message
+        try:
+            paginator = DashboardPaginator(tunnels)
+            new_msg = await channel.send(embed=paginator.build_page_embed(), view=paginator)
+            dashboard_info[guild_id] = {"channel": channel.id, "message": new_msg.id}
+            save_data(DASH_FILE, dashboard_info)
+            print(f"[RECOVERY] Dashboard recreated in {guild.name}")
+        except Exception as inner_e:
+            print(f"[FATAL] Could not recreate dashboard: {inner_e}")
 
 # ============================================================
 # ORDER DASHBOARD VIEW
@@ -741,22 +765,29 @@ class SingleOrderView(discord.ui.View):
         order["timestamps"]["claimed"] = datetime.now(timezone.utc).isoformat()
         save_orders()
 
-        await log_action(interaction.guild, f"{interaction.user.display_name} claimed order **#{self.order_id}** ({order['item']} x{order['quantity']}).")
+        await log_action(
+            interaction.guild,
+            interaction.user,
+            "claimed order",
+            target_name=f"#{self.order_id}",
+            extra=f"{order['item']} x{order['quantity']}"
+        )
         await refresh_order_dashboard(interaction.guild)
         await interaction.followup.send(f"🛠 Order **#{self.order_id}** claimed successfully.", ephemeral=True)
 
-    @discord.ui.button(label="Update Status", style=discord.ButtonStyle.green)
+    # ✅ Fixed Update Button – Opens Dropdown
     @discord.ui.button(label="Update Status", style=discord.ButtonStyle.green)
     async def update_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Opens a dropdown to update order status."""
         if not has_authorized_role(interaction.user):
             await interaction.response.send_message("🚫 Unauthorized.", ephemeral=True)
             return
 
         await interaction.response.send_message(
-        "📝 Select a new status from the dropdown below:",
-        view=OrderStatusSelectView(self.order_id),
-        ephemeral=True
-    )
+            "📝 Select a new status from the dropdown below:",
+            view=OrderStatusSelectView(self.order_id),
+            ephemeral=True
+        )
 
     @discord.ui.button(label="Mark Complete", style=discord.ButtonStyle.gray)
     async def complete_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -779,10 +810,10 @@ class SingleOrderView(discord.ui.View):
             interaction.guild,
             interaction.user,
             "marked order complete",
-            target_name=f"**#{self.order_id}**",
+            target_name=f"#{self.order_id}",
             extra=f"{order['item']} x{order['quantity']}"
         )
-        
+
         await refresh_order_dashboard(interaction.guild)
         await interaction.followup.send(f"✅ Order **#{self.order_id}** marked complete.", ephemeral=True)
 
@@ -805,12 +836,13 @@ class SingleOrderView(discord.ui.View):
         await log_action(
             interaction.guild,
             interaction.user,
-            "Deleted order",
-            target_name=f"**#{self.order_id}**",
+            "deleted order",
+            target_name=f"#{self.order_id}",
+            extra=f"{deleted['item']} x{deleted['quantity']}"
         )
         await refresh_order_dashboard(interaction.guild)
         await interaction.followup.send(f"🗑️ Order **#{self.order_id}** deleted.", ephemeral=True)
-
+        
 # ============================================================
 # CLICKABLE ORDER DASHBOARD
 # ============================================================
