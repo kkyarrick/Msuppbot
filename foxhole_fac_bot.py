@@ -161,7 +161,7 @@ async def log_action(
             line = f"🕒 `{timestamp}` — {actor.display_name} {action_type}"
 
             if target_name:
-                line += f" **{target_name}**"
+                line += f" {target_name}"
             if location:
                 line += f" at `{location}`"
             if extra:
@@ -667,10 +667,6 @@ async def refresh_orders_loop():
 @refresh_orders_loop.before_loop
 async def before_refresh_orders_loop():
     await bot.wait_until_ready()
-
-# ============================================================
-# INTERACTIVE ORDER DASHBOARD (CLICKABLE)
-# ============================================================
 
 # ============================================================
 # INTERACTIVE ORDER STATUS DROPDOWN
@@ -1291,7 +1287,12 @@ async def endwar(interaction: discord.Interaction):
     # Refresh dashboard to empty state
     await refresh_dashboard(interaction.guild)
 
-    await log_action(interaction.guild, f"{interaction.user.display_name} executed `/endwar` — data wiped and summary posted.")
+    await log_action(
+        interaction.guild,
+        interaction.user,
+        "executed /endwar",
+        extra="Data wiped and summary posted."
+    )
 
     # Private confirmation
     await interaction.followup.send("✅ End of War complete. Data has been wiped clean.", ephemeral=True)
@@ -1494,7 +1495,7 @@ async def order_claim(interaction: discord.Interaction, order_id: int):
         interaction.guild,
         interaction.user,
         "claimed order",
-        target_name=f"**#{order_id}**",
+        target_name=f"#{order_id}",
         extra=f"{order['item']} x{order['quantity']}"
     )
     await interaction.followup.send(f"🛠 Order **#{order_id}** claimed successfully.", ephemeral=True)
@@ -1528,7 +1529,14 @@ async def order_update(interaction: discord.Interaction, order_id: int, status: 
     order["timestamps"]["last_update"] = datetime.now(timezone.utc).isoformat()
     save_orders()
 
-    await log_action(interaction.guild, f"{interaction.user.display_name} updated order **#{order_id}** → **{status}**.")
+    await log_action(
+        interaction.guild,
+        interaction.user,
+        "updated order status",
+        target_name=f"#{order_id}",
+        extra=f"{order['status']} → {status}"
+    )
+
     await interaction.followup.send(f"✅ Order **#{order_id}** marked as **{status}**.", ephemeral=True)
 
 # ------------------------------------------------------------
@@ -1551,7 +1559,14 @@ async def order_delete(interaction: discord.Interaction, order_id: int):
     deleted = orders_data["orders"].pop(order_id)
     save_orders()
 
-    await log_action(interaction.guild, f"{interaction.user.display_name} deleted order **#{order_id}** ({deleted['item']} x{deleted['quantity']}).")
+    await log_action(
+        interaction.guild,
+        interaction.user,
+        "deleted order",
+        target_name=f"#{order_id}",
+        extra=f"{deleted['item']} x{deleted['quantity']}"
+    )
+    
     await interaction.followup.send(f"🗑️ Order **#{order_id}** deleted successfully.", ephemeral=True)
 
 # ------------------------------------------------------------
@@ -1688,7 +1703,7 @@ async def flush_log_buffer():
         timestamp = now.strftime("%Y-%m-%d %H:%M:%S UTC")
 
         await thread.send(
-            f"🧾 `{timestamp}` — {user.display_name} {action} **{amount:,} supplies** total at **{target_name}** today."
+            f"🧾 `{timestamp}` — {user.display_name} {action} **{amount:,} supplies** total at {target_name} today."
         )
 
         del log_buffer[key]  # clear after posting
