@@ -65,7 +65,29 @@ tunnels = load_data(DATA_FILE, {})
 users = load_data(USER_FILE, {})
 dashboard_info = load_data(DASH_FILE, {})  # {guild_id: {"channel": id, "message": id}}
 contributions = load_data(CONTRIB_FILE, {})
-log_buffer = {}
+
+def normalize_dashboard_info():
+    changed = False
+    for gid, info in dashboard_info.items():
+
+        # Fix tunnel dashboard keys
+        if "channel" in info:
+            info["tunnel_channel"] = info.pop("channel")
+            changed = True
+        if "message" in info:
+            info["tunnel_message"] = info.pop("message")
+            changed = True
+
+        # Fix orders dashboard keys
+        if "order_channel" in info:
+            info["orders_channel"] = info.pop("order_channel")
+            changed = True
+        if "order_message" in info:
+            info["orders_message"] = info.pop("order_message")
+            changed = True
+
+    if changed:
+        save_data(DASH_FILE, dashboard_info)
 
 def catch_up_tunnels():
     now = datetime.now(timezone.utc)
@@ -92,82 +114,146 @@ def catch_up_tunnels():
 # DATA LOGGING
 # ============================================================
 
+# ============================================================
+# DATA LOGGING — Unified System (A2 Format)
+# ============================================================
+
+def format_log(
+    actor: discord.Member | discord.User,
+    action: str,
+    target: str | None = None,
+    details: str | None = None,
+):
+    """Return a perfectly formatted log line according to A2 standard."""
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    base = f"🧾 `{timestamp}` — {actor.display_name} {action}"
+
+    if target:
+        base += f" **{target}**"
+
+    if details:
+        base += f" ({details})"
+
+    return base
+
+
+async def get_fac_log_thread(guild: discord.Guild):
+    """Returns the FAC Logs thread, creating it if missing."""
+    guild_id = str(guild.id)
+    log_channel_id = dashboard_info.get(guild_id, {}).get("log_channel")
+    if not log_channel_id:
+        return None
+
+    log_channel = guild.get_channel(log_channel_id)
+    if not log_channel:
+        return None
+
+    # Find existing thread
+    thread = discord.utils.get(log_channel.threads, name="FAC Logs")
+    if thread:
+        return thread
+
+    # Create thread if missing
+    thread = await log_channel.create_thread(
+        name="FAC Logs",
+        type=discord.ChannelType.public_thread
+    )
+    await thread.send("🧾 **FAC Audit Log Thread Created**")
+    return thread
+
+
+# ------------------------------------------------------------
+# BATCHING for SUPPLY ADDITIONS ONLY
+# ------------------------------------------------------------
+log_buffer = {}  # (guild_id, user_id, tunnel_name, date) → {amount, last_action}
+
+
+async def flush_supply_logs():
+    """Flushes batched supply submissions immediately."""
+    now = datetime.now(timezone.utc)
+
+    for key, entry in list(log_buffer.items()):
+        guild_id, user_id, tunnel_name, date_key = key
+        amount = entry["amount"]
+
+        guild = discord.utils.get(bot.guilds, id=guild_id)
+        if not guild:
+            continue
+
+        thread = await get_fac_log_thread(guild)
+        if not thread:
+            continue
+
+        user = guild.get_member(user_id) or await bot.fetch_user(user_id)
+
+        line = format_log(
+            actor=user,
+            action="added supplies to",
+            target=tunnel_name,
+            details=f"{amount:,} total today"
+        )
+
+        await thread.send(line)
+        del log_buffer[key]
+
+
+# ------------------------------------------------------------
+# Unified Log Entry Function (Supply, Orders, Admin, Everything)
+# ------------------------------------------------------------
 async def log_action(
     guild: discord.Guild,
-    actor: discord.User | discord.Member,
-    action_type: str,
-    target_name: str = None,
-    amount: int | float | None = None,
-    location: str | None = None,
-    extra: str = None
+    actor: discord.Member | discord.User,
+    action: str,
+    target_name: str | None = None,
+    amount: int | None = None,
+    details: str | None = None,
 ):
-    """Log user actions with smart batching and real-time flushing when switching tunnels."""
+    """Universal logger for tunnels, orders, and admin actions."""
+
     try:
-        guild_id = str(guild.id)
-        log_channel_id = dashboard_info.get(guild_id, {}).get("log_channel")
-        if not log_channel_id:
-            return
-
-        log_channel = guild.get_channel(log_channel_id)
-        if not log_channel:
-            return
-
-        # Ensure FAC Logs thread exists
-        thread = discord.utils.get(log_channel.threads, name="FAC Logs")
+        # Get logging location
+        thread = await get_fac_log_thread(guild)
         if not thread:
-            thread = await log_channel.create_thread(
-                name="FAC Logs",
-                type=discord.ChannelType.public_thread
-            )
-            await thread.send("🧾 **FAC Audit Log Thread Created** — all actions will be recorded here.")
+            return
 
-        now = datetime.now(timezone.utc)
-        date_key = now.strftime("%Y-%m-%d")
+        # ------------------------------------------------------------
+        # SUPPLY ACTION? → batch it
+        # ------------------------------------------------------------
+        is_supply = action.lower() in [
+            "added supplies",
+            "submitted stacks",
+            "1500 added",
+            "supply added",
+            "stack submission",
+        ]
 
-        # Build base key for user+day
-        key_prefix = (guild.id, actor.id, date_key)
-
-        # Detect any existing batched entry
-        existing_key = next((k for k in log_buffer if k[:3] == key_prefix), None)
-
-        # If switching tunnels, flush previous entry first
-        if existing_key and existing_key[2] != target_name:
-            prev_data = log_buffer.pop(existing_key)
-            prev_amount = prev_data.get("amount", 0)
-            prev_target = existing_key[2]
-            prev_action = prev_data.get("action", "did something")
-            timestamp = now.strftime("%Y-%m-%d %H:%M:%S UTC")
-
-            await thread.send(
-                f"🧾 `{timestamp}` — {actor.display_name} {prev_action} "
-                f"**{prev_amount:,} supplies** total at **{prev_target}** today."
+        if is_supply:
+            key = (
+                guild.id,
+                actor.id,
+                target_name,
+                datetime.now(timezone.utc).strftime("%Y-%m-%d")
             )
 
-        # Build new key for current action
-        key = (guild.id, actor.id, target_name, date_key)
-
-        # Check if supply-type action (eligible for batching)
-        if any(word in action_type.lower() for word in ["supply", "stack", "done", "add"]):
             if key not in log_buffer:
-                log_buffer[key] = {"amount": 0, "last": now, "action": action_type}
+                log_buffer[key] = {"amount": 0}
 
             if amount:
                 log_buffer[key]["amount"] += amount
-            log_buffer[key]["last"] = now
 
-        else:
-            # Immediate structured log for non-batchable actions
-            timestamp = now.strftime("%Y-%m-%d %H:%M:%S UTC")
-            line = f"🕒 `{timestamp}` — {actor.display_name} {action_type}"
+            return  # don’t immediately send, wait or flush on change
 
-            if target_name:
-                line += f" {target_name}"
-            if location:
-                line += f" at `{location}`"
-            if extra:
-                line += f" ({extra})"
-
-            await thread.send(line)
+        # ------------------------------------------------------------
+        # NON-SUPPLY ACTIONS → send instantly
+        # ------------------------------------------------------------
+        line = format_log(
+            actor=actor,
+            action=action,
+            target=target_name,
+            details=details
+        )
+        await thread.send(line)
 
     except Exception as e:
         print(f"[LOGGING ERROR] {e}")
@@ -287,16 +373,6 @@ class TunnelButton(Button):
             ephemeral=True,
             view=view
         )
-
-class DashboardView(View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.rebuild()
-
-    def rebuild(self):
-        self.clear_items()
-        for name in tunnels.keys():
-            self.add_item(TunnelButton(name))
 
 # ============================================================
 # DASHBOARD PAGINATION SYSTEM
@@ -480,7 +556,9 @@ async def refresh_dashboard(guild: discord.Guild):
         print(f"[INFO] No dashboard info found for guild {guild.name}")
         return
 
-    channel = guild.get_channel(info.get("channel"))
+    channel = guild.get_channel(info.get("tunnel_channel"))
+    msg = await channel.fetch_message(info["tunnel_message"])
+
     if not channel:
         print(f"[WARN] Dashboard channel missing for {guild.name}")
         return
@@ -496,7 +574,10 @@ async def refresh_dashboard(guild: discord.Guild):
         # Dashboard message deleted or invalid — recreate
         paginator = DashboardPaginator(tunnels)
         new_msg = await channel.send(embed=paginator.build_page_embed(), view=paginator)
-        dashboard_info[guild_id] = {"channel": channel.id, "message": new_msg.id}
+        dashboard_info[guild_id] = {
+            "tunnel_channel": channel.id,
+            "tunnel_message": new_msg.id
+        }
         save_data(DASH_FILE, dashboard_info)
         print(f"[INFO] Recreated dashboard in {guild.name}")
 
@@ -506,7 +587,10 @@ async def refresh_dashboard(guild: discord.Guild):
         try:
             paginator = DashboardPaginator(tunnels)
             new_msg = await channel.send(embed=paginator.build_page_embed(), view=paginator)
-            dashboard_info[guild_id] = {"channel": channel.id, "message": new_msg.id}
+            dashboard_info[guild_id] = {
+                "tunnel_channel": channel.id,
+                "tunnel_message": new_msg.id
+            }
             save_data(DASH_FILE, dashboard_info)
             print(f"[RECOVERY] Dashboard recreated in {guild.name}")
         except Exception as inner_e:
@@ -620,14 +704,14 @@ async def order_dashboard(interaction: discord.Interaction):
     guild_id = str(interaction.guild_id)
     embed = build_order_dashboard()
 
-    if guild_id in dashboard_info and "order_message" in dashboard_info[guild_id]:
+    if guild_id in dashboard_info and "orders_message" in dashboard_info[guild_id]:
         await refresh_order_dashboard(interaction.guild)
         await interaction.followup.send("🔁 Order dashboard refreshed.", ephemeral=True)
         return
 
     msg = await interaction.followup.send(embed=embed)
-    dashboard_info[guild_id]["order_channel"] = msg.channel.id
-    dashboard_info[guild_id]["order_message"] = msg.id
+    dashboard_info[guild_id]["orders_channel"] = msg.channel.id
+    dashboard_info[guild_id]["orders_message"] = msg.id
     save_data(DASH_FILE, dashboard_info)
 
     await interaction.followup.send("✅ Order dashboard created and bound to this channel.", ephemeral=True)
@@ -718,7 +802,7 @@ class OrderStatusSelect(discord.ui.Select):
             interaction.user,
             "updated order status",
             target_name=f"#{self.order_id}",
-            extra=f"{order['item']} x{order['quantity']} — {old_status} → {new_status}"
+            details=f"{old_status} → {new_status}"
         )
 
         # Refresh dashboard view
@@ -766,7 +850,7 @@ class SingleOrderView(discord.ui.View):
             interaction.user,
             "claimed order",
             target_name=f"#{self.order_id}",
-            extra=f"{order['item']} x{order['quantity']}"
+            details=f"{order['item']} x{order['quantity']}"
         )
         await refresh_order_dashboard(interaction.guild)
         await interaction.followup.send(f"🛠 Order **#{self.order_id}** claimed successfully.", ephemeral=True)
@@ -807,7 +891,7 @@ class SingleOrderView(discord.ui.View):
             interaction.user,
             "marked order complete",
             target_name=f"#{self.order_id}",
-            extra=f"{order['item']} x{order['quantity']}"
+            details=f"{order['item']} x{order['quantity']}"
         )
 
         await refresh_order_dashboard(interaction.guild)
@@ -834,7 +918,7 @@ class SingleOrderView(discord.ui.View):
             interaction.user,
             "deleted order",
             target_name=f"#{self.order_id}",
-            extra=f"{deleted['item']} x{deleted['quantity']}"
+            details=f"{deleted['item']} x{deleted['quantity']}"
         )
         await refresh_order_dashboard(interaction.guild)
         await interaction.followup.send(f"🗑️ Order **#{self.order_id}** deleted.", ephemeral=True)
@@ -992,11 +1076,9 @@ async def order_manage(interaction: discord.Interaction, order_id: int):
 
 @bot.event
 async def on_ready():
-    global dashboard_view
-    if 'dashboard_view' not in globals() or dashboard_view is None:
-        dashboard_view = DashboardView()
+    normalize_dashboard_info()
     catch_up_tunnels()  # ✅ simulate supply loss while offline
-    bot.add_view(dashboard_view)
+    bot.add_view(DashboardPaginator(tunnels))    
     bot.add_view(OrderDashboardView())
     await bot.tree.sync()
     print(f"🔁 Synced slash commands for {len(bot.tree.get_commands())} commands.")
@@ -1005,7 +1087,7 @@ async def on_ready():
     refresh_dashboard_loop.start()
     refresh_orders_loop.start()
     flush_log_buffer.start()
-    bot.add_view(DashboardPaginator(tunnels))
+
 
 # ============================================================
 # COMMANDS
@@ -1021,13 +1103,17 @@ async def addtunnel(interaction: discord.Interaction, name: str, total_supplies:
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     save_data(DATA_FILE, tunnels)
-    dashboard_view.rebuild()
 
     guild_id = str(interaction.guild_id)
     if guild_id not in dashboard_info:
         # First dashboard instance: create and store it
-        msg = await interaction.followup.send(embed=build_dashboard_embed(), view=dashboard_view)
-        dashboard_info[guild_id] = {"channel": msg.channel.id, "message": msg.id}
+        paginator = DashboardPaginator(tunnels)
+        msg = await interaction.followup.send(embed=paginator.build_page_embed(), view=paginator)
+        dashboard_info[guild_id] = {
+            "tunnel_channel": msg.channel.id,
+            "tunnel_message": msg.id
+        }
+
         save_data(DASH_FILE, dashboard_info)
     else:
         await log_action(
@@ -1037,7 +1123,7 @@ async def addtunnel(interaction: discord.Interaction, name: str, total_supplies:
             target_name=name,
             amount=total_supplies,
             location=location,
-            extra=f"Usage: {usage_rate}/hr"
+            details=f"Usage: {usage_rate}/hr"
         )
 
         await refresh_dashboard(interaction.guild)
@@ -1107,7 +1193,7 @@ async def updatetunnel(
         target_name=name,
         amount=tunnels[name]["total_supplies"],
         location=tunnels[name]["location"],
-        extra=f"Rate: {tunnels[name]['usage_rate']}/hr"
+        details=f"Rate: {tunnels[name]['usage_rate']}/hr"
     )
 
 
@@ -1291,7 +1377,7 @@ async def endwar(interaction: discord.Interaction):
         interaction.guild,
         interaction.user,
         "executed /endwar",
-        extra="Data wiped and summary posted."
+        details="Data wiped and summary posted."
     )
 
     # Private confirmation
@@ -1413,12 +1499,6 @@ async def help_command(interaction: discord.Interaction):
 # ORDERS SYSTEM
 # ============================================================
 
-def load_orders():
-    if os.path.exists(ORDERS_FILE):
-        with open(ORDERS_FILE, "r") as f:
-            return json.load(f)
-    return {"next_id": 1, "orders": {}}
-
 def save_orders():
     with open(ORDERS_FILE, "w") as f:
         json.dump(orders_data, f, indent=4)
@@ -1463,7 +1543,7 @@ async def order_create(interaction: discord.Interaction, item: str, quantity: in
         "placed new order",
         target_name=f"#{order_id}",
         amount=quantity,
-        extra=f"{item} ({priority})"
+        details=f"{item} ({priority})"
     )
 
     await interaction.followup.send(f"🧾 Order **#{order_id}** for **{item} x{quantity}** created successfully at **{location}**.", ephemeral=True)
@@ -1496,7 +1576,7 @@ async def order_claim(interaction: discord.Interaction, order_id: int):
         interaction.user,
         "claimed order",
         target_name=f"#{order_id}",
-        extra=f"{order['item']} x{order['quantity']}"
+        details=f"{order['item']} x{order['quantity']}"
     )
     await interaction.followup.send(f"🛠 Order **#{order_id}** claimed successfully.", ephemeral=True)
 
@@ -1534,7 +1614,7 @@ async def order_update(interaction: discord.Interaction, order_id: int, status: 
         interaction.user,
         "updated order status",
         target_name=f"#{order_id}",
-        extra=f"{order['status']} → {status}"
+        details=f"{order['status']} → {status}"
     )
 
     await interaction.followup.send(f"✅ Order **#{order_id}** marked as **{status}**.", ephemeral=True)
@@ -1564,7 +1644,7 @@ async def order_delete(interaction: discord.Interaction, order_id: int):
         interaction.user,
         "deleted order",
         target_name=f"#{order_id}",
-        extra=f"{deleted['item']} x{deleted['quantity']}"
+        details=f"{deleted['item']} x{deleted['quantity']}"
     )
     
     await interaction.followup.send(f"🗑️ Order **#{order_id}** deleted successfully.", ephemeral=True)
@@ -1671,47 +1751,11 @@ async def weekly_leaderboard():
 
 @tasks.loop(minutes=5)
 async def flush_log_buffer():
-    """Flush batched logs into FAC log thread every 5 minutes."""
-    if not log_buffer:
-        return
-
-    now = datetime.now(timezone.utc)
-    to_flush = list(log_buffer.items())
-
-    for key, data in to_flush:
-        guild_id, user_id, target_name, date_key = key
-        amount = data["amount"]
-        action = data["action"]
-
-        guild = discord.utils.get(bot.guilds, id=guild_id)
-        if not guild:
-            continue
-
-        log_channel_id = dashboard_info.get(str(guild.id), {}).get("log_channel")
-        if not log_channel_id:
-            continue
-
-        log_channel = guild.get_channel(log_channel_id)
-        if not log_channel:
-            continue
-
-        thread = discord.utils.get(log_channel.threads, name="FAC Logs")
-        if not thread:
-            continue
-
-        user = guild.get_member(user_id) or await bot.fetch_user(user_id)
-        timestamp = now.strftime("%Y-%m-%d %H:%M:%S UTC")
-
-        await thread.send(
-            f"🧾 `{timestamp}` — {user.display_name} {action} **{amount:,} supplies** total at {target_name} today."
-        )
-
-        del log_buffer[key]  # clear after posting
+    await flush_supply_logs()
 
 @flush_log_buffer.before_loop
-async def before_flush_log_buffer():
+async def before_flush_supply():
     await bot.wait_until_ready()
-
 
 # ============================================================
 # START
