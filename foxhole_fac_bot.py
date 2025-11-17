@@ -111,8 +111,51 @@ def catch_up_tunnels():
         save_data(DATA_FILE, tunnels)
 
 # ============================================================
-# DATA LOGGING
+# GLOBAL PERMISSIONS SYSTEM
 # ============================================================
+
+def has_authorized_role(member: discord.Member):
+    """
+    TEMPORARY GLOBAL LOCK:
+    Restrict ALL bot actions to 'Officer'.
+
+    To switch to Verified™ later, simply replace:
+        "Officer" → "Verified™"
+    """
+    return any(r.name == "Officer" for r in member.roles)
+
+
+async def interaction_role_guard(interaction: discord.Interaction):
+    """
+    This protects ALL button/select/modal interactions.
+    If user is not authorized → block the action.
+    """
+    if not has_authorized_role(interaction.user):
+        try:
+            await interaction.response.send_message(
+                "🚫 You do not have permission to perform this action.",
+                ephemeral=True
+            )
+        except discord.InteractionResponded:
+            await interaction.followup.send(
+                "🚫 You do not have permission to perform this action.",
+                ephemeral=True
+            )
+        return False
+
+    return True
+
+
+@bot.check
+async def global_permission_lock(ctx: commands.Context):
+    """
+    Global lock for ALL slash commands.
+    This means officers-only until changed.
+    """
+    if isinstance(ctx.user, discord.Member) and has_authorized_role(ctx.user):
+        return True
+
+    raise commands.CheckFailure("🚫 You do not have permission to use this command.")
 
 # ============================================================
 # DATA LOGGING — Unified System (A2 Format)
@@ -336,6 +379,9 @@ class TunnelButton(Button):
         self.tunnel = tunnel
 
     async def callback(self, interaction: discord.Interaction):
+        if not await interaction_role_guard(interaction):
+            return
+
         view = discord.ui.View(timeout=30)
 
         guild_id = str(interaction.guild.id)
@@ -419,35 +465,6 @@ class DashboardPaginator(discord.ui.View):
 
         embed.set_footer(text="Updated every 2 minutes. Use the buttons below to add supplies or navigate pages.")
         return embed
-
-    # -----------------------------------------
-    # Navigation Buttons
-    # -----------------------------------------
-    @discord.ui.button(label="⏮️", style=discord.ButtonStyle.gray)
-    async def first_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.page = 0
-        self.build_page_buttons()
-        await interaction.response.edit_message(embed=self.build_page_embed(), view=self)
-
-    @discord.ui.button(label="◀️", style=discord.ButtonStyle.gray)
-    async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if self.page > 0:
-            self.page -= 1
-        self.build_page_buttons()
-        await interaction.response.edit_message(embed=self.build_page_embed(), view=self)
-
-    @discord.ui.button(label="▶️", style=discord.ButtonStyle.gray)
-    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if self.page < self.total_pages - 1:
-            self.page += 1
-        self.build_page_buttons()
-        await interaction.response.edit_message(embed=self.build_page_embed(), view=self)
-
-    @discord.ui.button(label="⏭️", style=discord.ButtonStyle.gray)
-    async def last_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.page = self.total_pages - 1
-        self.build_page_buttons()
-        await interaction.response.edit_message(embed=self.build_page_embed(), view=self)
 
     # -----------------------------------------
     # Rebuild tunnel buttons dynamically
@@ -931,6 +948,8 @@ class OrderButton(discord.ui.Button):
         self.order_id = order_id
 
     async def callback(self, interaction: discord.Interaction):
+        if not await interaction_role_guard(interaction):
+            return
         """When an order button is clicked, show detailed interactive view."""
         order = orders_data["orders"].get(self.order_id)
         if not order:
@@ -1075,7 +1094,6 @@ async def order_manage(interaction: discord.Interaction, order_id: int):
 async def on_ready():
     normalize_dashboard_info()
     catch_up_tunnels()  # ✅ simulate supply loss while offline
-    bot.add_view(DashboardPaginator(tunnels))
     await bot.tree.sync()
     print(f"🔁 Synced slash commands for {len(bot.tree.get_commands())} commands.")
     print(f"✅ Logged in as {bot.user}")
@@ -1498,11 +1516,6 @@ def save_orders():
         json.dump(orders_data, f, indent=4)
 
 orders_data = load_orders()
-
-def has_authorized_role(member: discord.Member):
-    """Check if the user has one of the authorized roles."""
-    allowed_roles = ["FAC Cert", "Logi Cert", "NCO", "Officer"]
-    return any(r.name in allowed_roles for r in member.roles)
 
 # ------------------------------------------------------------
 # Create Order
