@@ -26,16 +26,6 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
     raise ValueError("❌ No DISCORD_TOKEN found in environment variables.")
 
-for file, default in [
-    (DATA_FILE, {}),
-    (USER_FILE, {}),
-    (DASH_FILE, {}),
-    (ORDERS_FILE, {"next_id": 1, "orders": {}})
-    
-]:
-    if not os.path.exists(file):
-        save_data(file, default)
-
 # ============================================================
 # DATA MANAGEMENT
 # ============================================================
@@ -60,6 +50,16 @@ def load_orders():
             except json.JSONDecodeError:
                 pass
     return {"next_id": 1, "orders": {}}
+
+# Ensure data files exist
+for file, default in [
+    (DATA_FILE, {}),
+    (USER_FILE, {}),
+    (DASH_FILE, {}),
+    (ORDERS_FILE, {"next_id": 1, "orders": {}})
+]:
+    if not os.path.exists(file):
+        save_data(file, default)
 
 tunnels = load_data(DATA_FILE, {})
 users = load_data(USER_FILE, {})
@@ -338,6 +338,10 @@ class TunnelButton(Button):
     async def callback(self, interaction: discord.Interaction):
         view = discord.ui.View(timeout=30)
 
+        guild_id = str(interaction.guild.id)
+        if guild_id not in dashboard_info:
+            dashboard_info[guild_id] = {}
+
         async def done_callback(interaction: discord.Interaction):
             tunnels[self.tunnel]["total_supplies"] += SUPPLY_INCREMENT
             user_id = str(interaction.user.id)
@@ -556,45 +560,37 @@ async def refresh_dashboard(guild: discord.Guild):
         print(f"[INFO] No dashboard info found for guild {guild.name}")
         return
 
-    channel = guild.get_channel(info.get("tunnel_channel"))
-    msg = await channel.fetch_message(info["tunnel_message"])
+    channel_id = info.get("tunnel_channel")
+    msg_id = info.get("tunnel_message")
 
-    if not channel:
-        print(f"[WARN] Dashboard channel missing for {guild.name}")
+    if not channel_id or not msg_id:
+        print(f"[INFO] No tunnel dashboard data for {guild.name}")
         return
+        
+    channel = guild.get_channel(channel_id)
+    if not channel:
+        print(f"[WARN] Tunnel dashboard channel missing for {guild.name}")
+        return
+        
+    paginator = DashboardPaginator(tunnels)
 
     try:
-        # Try to edit existing dashboard
-        msg = await channel.fetch_message(info["message"])
-        paginator = DashboardPaginator(tunnels)
+        msg = await channel.fetch_message(msg_id)
         await msg.edit(embed=paginator.build_page_embed(), view=paginator)
-        #print(f"[OK] Refreshed dashboard in {guild.name}")
-
+        return
+        
     except discord.NotFound:
-        # Dashboard message deleted or invalid — recreate
-        paginator = DashboardPaginator(tunnels)
+        # recreate
         new_msg = await channel.send(embed=paginator.build_page_embed(), view=paginator)
         dashboard_info[guild_id] = {
             "tunnel_channel": channel.id,
             "tunnel_message": new_msg.id
         }
         save_data(DASH_FILE, dashboard_info)
-        print(f"[INFO] Recreated dashboard in {guild.name}")
-
-    except Exception as e:
-        print(f"[ERROR] Failed to refresh dashboard in {guild.name}: {e}")
-        # Attempt recovery by recreating message
-        try:
-            paginator = DashboardPaginator(tunnels)
-            new_msg = await channel.send(embed=paginator.build_page_embed(), view=paginator)
-            dashboard_info[guild_id] = {
-                "tunnel_channel": channel.id,
-                "tunnel_message": new_msg.id
-            }
-            save_data(DASH_FILE, dashboard_info)
-            print(f"[RECOVERY] Dashboard recreated in {guild.name}")
-        except Exception as inner_e:
-            print(f"[FATAL] Could not recreate dashboard: {inner_e}")
+        print(f"[RECOVERY] Dashboard recreated in {guild.name}")
+        return     
+    except Exception as inner_e:
+        print(f"[FATAL] Could not recreate dashboard: {inner_e}")
 
 # ============================================================
 # ORDER DASHBOARD VIEW
@@ -710,6 +706,8 @@ async def order_dashboard(interaction: discord.Interaction):
         return
 
     msg = await interaction.followup.send(embed=embed)
+    if guild_id not in dashboard_info:
+        dashboard_info[guild_id] = {}
     dashboard_info[guild_id]["orders_channel"] = msg.channel.id
     dashboard_info[guild_id]["orders_message"] = msg.id
     save_data(DASH_FILE, dashboard_info)
@@ -746,7 +744,6 @@ async def refresh_orders_loop():
             continue
         except Exception as e:
             print(f"[ORDER DASHBOARD REFRESH ERROR] {e}")
-
 
 @refresh_orders_loop.before_loop
 async def before_refresh_orders_loop():
@@ -1078,8 +1075,7 @@ async def order_manage(interaction: discord.Interaction, order_id: int):
 async def on_ready():
     normalize_dashboard_info()
     catch_up_tunnels()  # ✅ simulate supply loss while offline
-    bot.add_view(DashboardPaginator(tunnels))    
-    bot.add_view(OrderDashboardView())
+    bot.add_view(DashboardPaginator(tunnels))
     await bot.tree.sync()
     print(f"🔁 Synced slash commands for {len(bot.tree.get_commands())} commands.")
     print(f"✅ Logged in as {bot.user}")
@@ -1122,7 +1118,6 @@ async def addtunnel(interaction: discord.Interaction, name: str, total_supplies:
             "added new tunnel",
             target_name=name,
             amount=total_supplies,
-            location=location,
             details=f"Usage: {usage_rate}/hr"
         )
 
@@ -1192,10 +1187,8 @@ async def updatetunnel(
         "updated tunnel",
         target_name=name,
         amount=tunnels[name]["total_supplies"],
-        location=tunnels[name]["location"],
         details=f"Rate: {tunnels[name]['usage_rate']}/hr"
     )
-
 
     await interaction.followup.send(f"✅ Tunnel **{name}** updated successfully.", ephemeral=True)
 
@@ -1209,7 +1202,10 @@ async def dashboard(interaction: discord.Interaction):
         return
     paginator = DashboardPaginator(tunnels)
     msg = await interaction.followup.send(embed=paginator.build_page_embed(), view=paginator)
-    dashboard_info[gid] = {"channel": msg.channel.id, "message": msg.id}
+    dashboard_info[gid] = {
+        "tunnel_channel": msg.channel.id,
+        "tunnel_message": msg.id
+    }
     save_data(DASH_FILE, dashboard_info)
     await interaction.followup.send("✅ Dashboard created and bound to this channel.", ephemeral=True)
 
@@ -1224,7 +1220,7 @@ async def leaderboard(interaction: discord.Interaction):
 
         top = sorted(users.items(), key=lambda x: x[1], reverse=True)[:10]
 
-# Medal emojis for top 3 positions
+        # Medal emojis for top 3 positions
         medals = ["🥇", "🥈", "🥉"]
 
         desc_lines = []
@@ -1234,7 +1230,6 @@ async def leaderboard(interaction: discord.Interaction):
             desc_lines.append(f"{medal} {user.display_name} — **{amt:,}**")
 
         desc = "\n".join(desc_lines) or "No contributions recorded."
-
 
         embed = discord.Embed(
             title="🏆 Supply Leaderboard",
@@ -1313,7 +1308,6 @@ async def deletetunnel(interaction: discord.Interaction, name: str):
         "deleted tunnel",
         target_name=name
     )
-
 
     await interaction.followup.send(f"🗑️ Tunnel **{name}** deleted successfully and dashboard updated.", ephemeral=True)
 
@@ -1605,6 +1599,7 @@ async def order_update(interaction: discord.Interaction, order_id: int, status: 
         await interaction.followup.send(f"⚠️ Invalid status. Choose one of: {', '.join(valid_statuses)}", ephemeral=True)
         return
 
+    old_status = order.get("status", "Unknown")
     order["status"] = status
     order["timestamps"]["last_update"] = datetime.now(timezone.utc).isoformat()
     save_orders()
@@ -1614,7 +1609,7 @@ async def order_update(interaction: discord.Interaction, order_id: int, status: 
         interaction.user,
         "updated order status",
         target_name=f"#{order_id}",
-        details=f"{order['status']} → {status}"
+        details=f"{old_status} → {status}"
     )
 
     await interaction.followup.send(f"✅ Order **#{order_id}** marked as **{status}**.", ephemeral=True)
@@ -1711,11 +1706,11 @@ async def weekly_leaderboard():
         info = dashboard_info.get(str(guild.id), {})
         channel = None
 
-# Check if custom channel is set
+        # Check if custom channel is set
         if "leaderboard_channel" in info:
              channel = guild.get_channel(info["leaderboard_channel"])
 
-# Fallback if not set or missing
+        # Fallback if not set or missing
         if not channel:
              channel = discord.utils.get(guild.text_channels, name="logistics") or \
                    discord.utils.get(guild.text_channels, name="general")
@@ -1727,7 +1722,7 @@ async def weekly_leaderboard():
             continue
         top = sorted(users.items(), key=lambda x: x[1], reverse=True)[:10]
 
-# Medal emojis for top 3 positions
+        # Medal emojis for top 3 positions
         medals = ["🥇", "🥈", "🥉"]
 
         desc_lines = []
