@@ -1058,34 +1058,6 @@ async def orders(interaction: discord.Interaction):
     dashboard_info[guild_id]["orders_message"] = msg.id
     save_data(DASH_FILE, dashboard_info)
 
-# ------------------------------------------------------------
-# Command: /order_manage — Open interactive controls for one order
-# ------------------------------------------------------------
-@bot.tree.command(name="order_manage", description="Open an interactive view to manage a specific order.")
-async def order_manage(interaction: discord.Interaction, order_id: int):
-    await interaction.response.defer(ephemeral=True)
-
-    order_id = str(order_id)
-    order = orders_data["orders"].get(order_id)
-    if not order:
-        await interaction.followup.send(f"❌ Order **#{order_id}** not found.", ephemeral=True)
-        return
-
-    embed = discord.Embed(
-        title=f"🧾 Order #{order_id}: {order['item']} x{order['quantity']}",
-        color=discord.Color.blurple(),
-        description=(
-            f"**Priority:** {order['priority']}\n"
-            f"**Status:** {order['status']}\n"
-            f"**Requested by:** <@{order['requested_by']}>\n"
-            f"**Claimed by:** {('<@' + order['claimed_by'] + '>') if order['claimed_by'] else '—'}"
-        ),
-        timestamp=datetime.now(timezone.utc)
-    )
-
-    await interaction.followup.send(embed=embed, view=SingleOrderView(order_id), ephemeral=True)
-
-
 # ============================================================
 # BOT EVENTS
 # ============================================================
@@ -1453,35 +1425,45 @@ async def setlogchannel(interaction: discord.Interaction, channel: discord.TextC
 async def help_command(interaction: discord.Interaction):
     embed = discord.Embed(
         title="🛠️ Foxhole FAC Bot Commands",
-        description="A full list of available commands and their uses.",
+        description="A complete list of available commands and their purposes.",
         color=discord.Color.blue()
     )
 
     embed.add_field(
         name="📦 Tunnel Management",
         value=(
-            "**/addtunnel** — Add a new tunnel with total supplies and usage rate.\n"
-            "**/addsupplies** — Add a specific amount of supplies to a tunnel.\n"
-            "**/updatetunnel** — Update tunnel values (no leaderboard impact).\n"
+            "**/addtunnel** — Add a new tunnel with initial supplies and usage rate.\n"
+            "**/updatetunnel** — Update tunnel supplies, usage rate or location.\n"
+            "**/addsupplies** — Add a custom amount of supplies to a tunnel.\n"
+            "**/deletetunnel** *(Officer only)* — Remove a tunnel.\n"
         ),
         inline=False
     )
 
     embed.add_field(
-        name="📊 Dashboard & Info",
+        name="📊 Dashboards",
         value=(
-            "**/dashboard** — Display or refresh the dashboard.\n"
-            "**/checkpermissions** — Check bot permissions in this channel.\n"
+            "**/dashboard** — Show or refresh the tunnel dashboard.\n"
+            "**/orders** — Show the interactive orders dashboard.\n"
+            "**/order_dashboard** — Create or refresh the bound orders dashboard.\n"
         ),
         inline=False
     )
 
     embed.add_field(
-        name="🏅 Leaderboards",
+        name="📦 Orders System",
         value=(
-            "**/leaderboard** — Show the current top contributors.\n"
-            "📅 **Weekly Leaderboard** — Auto-posts every Sunday 12:00 UTC.\n"
-            "**/setleaderboardchannel** *(Officer only)* — Choose where leaderboards and end-of-war summaries post.\n"
+            "**/order_create** — Create a new production order.\n"
+            "**/order_delete** *(Officer only)* — Delete an order.\n"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="📈 Contributions",
+        value=(
+            "**/leaderboard** — Show current weekly top contributors.\n"
+            "**/stats** — View your personal supply contribution stats.\n"
         ),
         inline=False
     )
@@ -1489,24 +1471,31 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(
         name="⚔️ War Management",
         value=(
-            "**/endwar** *(Officer only)* — Post end-of-war summary, wipe all tunnel & supply data.\n"
+            "**/endwar** *(Officer only)* — Post end-of-war summary & reset tunnel data.\n"
         ),
         inline=False
     )
 
     embed.add_field(
-        name="🔁 Automatic Systems",
+        name="⚙️ Configuration (Officer Only)",
         value=(
-            "• Dashboard refreshes every 2 minutes.\n"
-            "• Supply depletion continues accurately after restarts.\n"
-            "• Dashboard buttons: **1500 (Done)** or **Submit Stacks (x100)**.\n"
+            "**/setleaderboardchannel** — Set where weekly leaderboards are posted.\n"
+            "**/setlogchannel** — Set where FAC logs are posted.\n"
         ),
         inline=False
     )
 
-    embed.set_footer(text="Use /help anytime for a quick reference.")
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    embed.add_field(
+        name="🧪 Utility",
+        value=(
+            "**/checkpermissions** — Check if the bot has all required permissions.\n"
+        ),
+        inline=False
+    )
 
+    embed.set_footer(text="Use /help anytime for a clean list of available commands.")
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+    
 # ============================================================
 # ORDERS SYSTEM
 # ============================================================
@@ -1557,77 +1546,6 @@ async def order_create(interaction: discord.Interaction, item: str, quantity: in
     await refresh_order_dashboard(interaction.guild)
 
 # ------------------------------------------------------------
-# Claim Order
-# ------------------------------------------------------------
-@bot.tree.command(name="order_claim", description="Claim an order for production.")
-async def order_claim(interaction: discord.Interaction, order_id: int):
-    await interaction.response.defer(ephemeral=True)
-
-    if not has_authorized_role(interaction.user):
-        await interaction.followup.send("🚫 You are not authorized to claim orders.", ephemeral=True)
-        return
-
-    order_id = str(order_id)
-    order = orders_data["orders"].get(order_id)
-    if not order:
-        await interaction.followup.send(f"❌ Order **#{order_id}** not found.", ephemeral=True)
-        return
-
-    order["claimed_by"] = str(interaction.user.id)
-    order["status"] = "Order Claimed"
-    order["timestamps"]["claimed"] = datetime.now(timezone.utc).isoformat()
-    save_orders()
-
-    await log_action(
-        interaction.guild,
-        interaction.user,
-        "claimed order",
-        target_name=f"#{order_id}",
-        details=f"{order['item']} x{order['quantity']}"
-    )
-    await interaction.followup.send(f"🛠 Order **#{order_id}** claimed successfully.", ephemeral=True)
-
-# ------------------------------------------------------------
-# Update Order Status
-# ------------------------------------------------------------
-@bot.tree.command(name="order_update", description="Update an order’s status manually.")
-async def order_update(interaction: discord.Interaction, order_id: int, status: str):
-    await interaction.response.defer(ephemeral=True)
-
-    if not has_authorized_role(interaction.user):
-        await interaction.followup.send("🚫 You are not authorized to update orders.", ephemeral=True)
-        return
-
-    order_id = str(order_id)
-    order = orders_data["orders"].get(order_id)
-    if not order:
-        await interaction.followup.send(f"❌ Order **#{order_id}** not found.", ephemeral=True)
-        return
-
-    valid_statuses = [
-        "Order Placed", "Order Claimed", "Order Started",
-        "In Progress", "Ready for Collection", "Complete"
-    ]
-    if status not in valid_statuses:
-        await interaction.followup.send(f"⚠️ Invalid status. Choose one of: {', '.join(valid_statuses)}", ephemeral=True)
-        return
-
-    old_status = order.get("status", "Unknown")
-    order["status"] = status
-    order["timestamps"]["last_update"] = datetime.now(timezone.utc).isoformat()
-    save_orders()
-
-    await log_action(
-        interaction.guild,
-        interaction.user,
-        "updated order status",
-        target_name=f"#{order_id}",
-        details=f"{old_status} → {status}"
-    )
-
-    await interaction.followup.send(f"✅ Order **#{order_id}** marked as **{status}**.", ephemeral=True)
-
-# ------------------------------------------------------------
 # Delete Order
 # ------------------------------------------------------------
 @bot.tree.command(name="order_delete", description="Officer-only: Delete an order.")
@@ -1656,40 +1574,6 @@ async def order_delete(interaction: discord.Interaction, order_id: int):
     )
     
     await interaction.followup.send(f"🗑️ Order **#{order_id}** deleted successfully.", ephemeral=True)
-
-# ------------------------------------------------------------
-# List Orders
-# ------------------------------------------------------------
-@bot.tree.command(name="order_list", description="List all current orders grouped by status.")
-async def order_list(interaction: discord.Interaction):
-    await interaction.response.defer(thinking=True)
-
-    if not orders_data["orders"]:
-        await interaction.followup.send("📦 No active orders found.", ephemeral=True)
-        return
-
-    grouped = {}
-    for oid, o in orders_data["orders"].items():
-        grouped.setdefault(o["status"], []).append((oid, o))
-
-    embed = discord.Embed(
-        title="📋 Active FAC Orders",
-        color=discord.Color.teal(),
-        timestamp=datetime.now(timezone.utc)
-    )
-
-    for status, entries in grouped.items():
-        lines = []
-        for oid, o in entries:
-            requester = await bot.fetch_user(int(o["requested_by"]))
-            claimed = f" — Claimed by {(await bot.fetch_user(int(o['claimed_by']))).display_name}" if o["claimed_by"] else ""
-            lines.append(f"**#{oid}** — {o['item']} x{o['quantity']} ({o['priority']}){claimed} — by {requester.display_name}")
-        embed.add_field(name=f"🔹 {status} ({len(entries)})", value="\n".join(lines), inline=False)
-
-    embed.set_footer(text="Use /order_update or /order_claim to modify orders.")
-    await interaction.followup.send(embed=embed)
-
-
 
 # ============================================================
 # TASKS
