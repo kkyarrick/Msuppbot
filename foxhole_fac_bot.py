@@ -66,6 +66,29 @@ users = load_data(USER_FILE, {})
 dashboard_info = load_data(DASH_FILE, {})  # {guild_id: {"channel": id, "message": id}}
 contributions = load_data(CONTRIB_FILE, {})
 
+# ============================================================
+# FACILITY / TUNNEL HELPERS
+# ============================================================
+
+def get_facility_record(facility_name: str) -> dict:
+    """
+    Ensure the facility exists in `tunnels` and return its record.
+    Structure:
+    tunnels[facility_name] = { "tunnels": { <tunnel_name>: { ... } } }
+    """
+    facility = tunnels.setdefault(facility_name, {})
+    if "tunnels" not in facility or not isinstance(facility["tunnels"], dict):
+        # If old flat data or bad format, normalize
+        facility["tunnels"] = facility.get("tunnels", {})
+    return facility
+
+def get_facility_tunnels(facility_name: str) -> dict:
+    """
+    Convenience: returns the dict of tunnels under a facility.
+    """
+    facility = get_facility_record(facility_name)
+    return facility["tunnels"]
+
 def normalize_dashboard_info():
     changed = False
     for gid, info in dashboard_info.items():
@@ -93,19 +116,24 @@ def catch_up_tunnels():
     now = datetime.now(timezone.utc)
     updated = False
 
-    for name, data in tunnels.items():
-        usage = data.get("usage_rate", 0)
-        last_str = data.get("last_updated")
-        if not last_str:
-            data["last_updated"] = now.isoformat()
-            continue
+    for facility_name, facility_data in tunnels.items():
+        tun_dict = facility_data.get("tunnels", {})
 
-        last = datetime.fromisoformat(last_str)
-        hours_passed = (now - last).total_seconds() / 3600
-        if hours_passed > 0 and usage > 0:
-            data["total_supplies"] = max(0, data["total_supplies"] - (usage * hours_passed))
-            data["last_updated"] = now.isoformat()
-            updated = True
+        for tunnel_name, tdata in tun_dict.items():
+            usage = tdata.get("usage_rate", 0)
+            last_str = tdata.get("last_updated")
+
+            if not last_str:
+                tdata["last_updated"] = now.isoformat()
+                continue
+
+            last = datetime.fromisoformat(last_str)
+            hours_passed = (now - last).total_seconds() / 3600
+
+            if hours_passed > 0 and usage > 0:
+                tdata["total_supplies"] = max(0, tdata["total_supplies"] - (usage * hours_passed))
+                tdata["last_updated"] = now.isoformat()
+                updated = True
 
     if updated:
         save_data(DATA_FILE, tunnels)
@@ -1581,18 +1609,23 @@ async def order_delete(interaction: discord.Interaction, order_id: int):
 
 @tasks.loop(minutes=2)
 async def refresh_dashboard_loop():
-    """Refresh dashboard and apply light supply drain every 2 minutes."""
-    for name, data in tunnels.items():
-        rate = data.get("usage_rate", 0)
-        if rate > 0:
-            # Subtract usage per 2-minute tick (usage_rate per hour → divide by 30)
-            data["total_supplies"] = max(0, data["total_supplies"] - rate / 30)
+    # apply usage decay first
+    for facility_data in tunnels.values():
+        for tdata in facility_data["tunnels"].values():
+            rate = tdata.get("usage_rate", 0)
+            if rate > 0:
+                tdata["total_supplies"] = max(0, tdata["total_supplies"] - rate / 30)
 
     save_data(DATA_FILE, tunnels)
 
-    # Update all dashboards
+    # update dashboards
     for guild in bot.guilds:
-        await refresh_dashboard(guild)
+        gid = str(guild.id)
+        facilities = dashboard_info.get(gid, {})
+
+        for facility_name, data in facilities.items():
+            if "tunnel_channel" in data:
+                await refresh_msupp_dashboard(guild, facility_name)
 
 @tasks.loop(time=time(hour=12, tzinfo=timezone.utc))
 async def weekly_leaderboard():
