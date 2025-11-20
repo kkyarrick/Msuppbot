@@ -1330,70 +1330,83 @@ async def deletetunnel(interaction: discord.Interaction, name: str):
     await interaction.followup.send(f"🗑️ Tunnel **{name}** deleted successfully and dashboard updated.", ephemeral=True)
 
 
-@bot.tree.command(name="endwar", description="Officer-only: show totals and reset all tunnel and supply data.")
+@bot.tree.command(name="endwar", description="Officer-only: reset all MSUPP facilities, tunnels, and orders.")
 async def endwar(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
 
-    # Officer-only restriction
     officer_role = discord.utils.get(interaction.guild.roles, name="Officer")
     if not officer_role or officer_role not in interaction.user.roles:
         await interaction.followup.send("🚫 You do not have permission to use this command.", ephemeral=True)
         return
 
-    # Compute totals before reset
-    total_supplies = sum(users.values()) if users else 0
-    top_contributors = sorted(users.items(), key=lambda x: x[1], reverse=True)[:5]
-    desc = "\n".join(
-        [f"**{i+1}.** {(await bot.fetch_user(int(uid))).display_name} — {amt:,}" for i, (uid, amt) in enumerate(top_contributors)]
-    ) or "No contributions recorded."
+    # -------------------------------
+    # 1️⃣ Build End-of-War summary
+    # -------------------------------
+    total_supplies = sum(users.values())
+    top = sorted(users.items(), key=lambda x: x[1], reverse=True)[:5]
+
+    top_lines = []
+    for i, (uid, amt) in enumerate(top):
+        user = await bot.fetch_user(int(uid))
+        top_lines.append(f"**{i+1}.** {user.display_name} — {amt:,}")
 
     embed = discord.Embed(
         title="⚔️ End of War Summary",
-        description=f"📦 **Total supplies contributed:** {total_supplies:,}\n\n🏅 **Top 5 Contributors:**\n{desc}",
+        description=f"📦 **Total supplies contributed:** {total_supplies:,}\n\n"
+                    f"🏅 **Top Contributors:**\n" + ("\n".join(top_lines) or "No data."),
         color=discord.Color.red(),
         timestamp=datetime.now(timezone.utc)
     )
-    embed.set_footer(text=f"Reset performed by {interaction.user.display_name}")
 
-    # Try to post summary to the leaderboard channel
-    guild_id = str(interaction.guild_id)
-    info = dashboard_info.get(guild_id, {})
-    leaderboard_channel = None
+    # -------------------------------
+    # 2️⃣ Post summary
+    # -------------------------------
+    gid = str(interaction.guild.id)
+    info = dashboard_info.get(gid, {})
 
+    post_channel = None
     if "leaderboard_channel" in info:
-        leaderboard_channel = interaction.guild.get_channel(info["leaderboard_channel"])
+        post_channel = interaction.guild.get_channel(info["leaderboard_channel"])
 
-    # Fallback if not found
-    if not leaderboard_channel:
-        leaderboard_channel = discord.utils.get(interaction.guild.text_channels, name="logistics") or \
-                              discord.utils.get(interaction.guild.text_channels, name="general")
+    if not post_channel:
+        post_channel = discord.utils.get(interaction.guild.text_channels, name="logistics") or \
+                       discord.utils.get(interaction.guild.text_channels, name="general")
 
-    if leaderboard_channel:
-        await leaderboard_channel.send(embed=embed)
-    else:
-        await interaction.followup.send(
-            "⚠️ Could not find a leaderboard or fallback channel to post the summary.",
-            ephemeral=True
-        )
+    if post_channel:
+        await post_channel.send(embed=embed)
 
-    # ✅ Reset all tracked data
+    # -------------------------------
+    # 3️⃣ Wipe ALL facility + tunnel data
+    # -------------------------------
     tunnels.clear()
     users.clear()
     save_data(DATA_FILE, tunnels)
     save_data(USER_FILE, users)
 
-    # Refresh dashboard to empty state
-    await refresh_dashboard(interaction.guild)
+    # -------------------------------
+    # 4️⃣ Reset orders (but keep dashboard location)
+    # -------------------------------
+    global orders_data
+    orders_data = {"next_id": 1, "orders": {}}
+    save_orders()
 
-    await log_action(
-        interaction.guild,
-        interaction.user,
-        "executed /endwar",
-        details="Data wiped and summary posted."
-    )
+    # -------------------------------
+    # 5️⃣ Remove ONLY facility dashboards
+    # -------------------------------
+    if gid in dashboard_info:
+        preserve = {
+            "orders_channel": dashboard_info[gid].get("orders_channel"),
+            "orders_message": dashboard_info[gid].get("orders_message"),
+            "log_channel": dashboard_info[gid].get("log_channel"),
+            "leaderboard_channel": dashboard_info[gid].get("leaderboard_channel")
+        }
+        dashboard_info[gid] = {k: v for k, v in preserve.items() if v}
+        save_data(DASH_FILE, dashboard_info)
 
-    # Private confirmation
-    await interaction.followup.send("✅ End of War complete. Data has been wiped clean.", ephemeral=True)
+    # -------------------------------
+    # 6️⃣ Final confirmation
+    # -------------------------------
+    await interaction.followup.send("✅ End of War complete. All data reset.", ephemeral=True)
 
 @bot.tree.command(name="checkpermissions", description="Check the bot's permissions in this channel.")
 async def checkpermissions(interaction: discord.Interaction):
