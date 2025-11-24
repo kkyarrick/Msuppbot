@@ -67,6 +67,46 @@ dashboard_info = load_data(DASH_FILE, {})  # {guild_id: {"channel": id, "message
 contributions = load_data(CONTRIB_FILE, {})
 
 # ============================================================
+# TUNNEL STRUCTURE MIGRATION (flat -> per-facility)
+# ============================================================
+
+def is_nested_tunnel_structure(data: dict) -> bool:
+    """Return True if `data` looks like {facility: { 'tunnels': { ... }}}."""
+    if not data:
+        return False
+    for v in data.values():
+        if not isinstance(v, dict):
+            return False
+        if "tunnels" not in v or not isinstance(v["tunnels"], dict):
+            return False
+    return True
+
+
+def migrate_flat_tunnels_to_facilities():
+    """
+    If tunnels are still in the old flat format:
+        { "Tunnel A": {...}, "Tunnel B": {...} }
+    wrap them into a default facility:
+        { "Legacy Facility": { "tunnels": { ... } } }
+    """
+    global tunnels
+    if is_nested_tunnel_structure(tunnels):
+        return
+
+    if not tunnels:
+        return  # nothing to migrate
+
+    flat = tunnels
+    tunnels = {
+        "Legacy Facility": {
+            "tunnels": flat
+        }
+    }
+    save_data(DATA_FILE, tunnels)
+
+migrate_flat_tunnels_to_facilities()
+
+# ============================================================
 # FACILITY / TUNNEL HELPERS
 # ============================================================
 
@@ -74,26 +114,72 @@ def get_facility_record(facility_name: str) -> dict:
     """
     Ensure the facility exists in `tunnels` and return its record.
     Structure:
-    tunnels[facility_name] = { "tunnels": { <tunnel_name>: { ... } } }
+        tunnels[facility_name] = { "tunnels": { <tunnel_name>: { ... } } }
     """
     facility = tunnels.setdefault(facility_name, {})
     if "tunnels" not in facility or not isinstance(facility["tunnels"], dict):
-        # If old flat data or bad format, normalize
         facility["tunnels"] = facility.get("tunnels", {})
     return facility
 
+
 def get_facility_tunnels(facility_name: str) -> dict:
-    """
-    Convenience: returns the dict of tunnels under a facility.
-    """
+    """Convenience: returns the dict of tunnels under a facility."""
     facility = get_facility_record(facility_name)
     return facility["tunnels"]
 
+
+def find_tunnel(tunnel_name: str):
+    """
+    Find a tunnel by name across all facilities.
+
+    Returns (facility_name, tunnel_dict) if found, otherwise (None, None).
+    """
+    for fname, facility in tunnels.items():
+        tun_dict = facility.get("tunnels", {})
+        if tunnel_name in tun_dict:
+            return fname, tun_dict[tunnel_name]
+    return None, None
+
+
+def get_facility_for_channel(guild_id: str, channel_id: int) -> str | None:
+    """
+    Given a guild + channel/thread id, return the facility bound to that dashboard,
+    or None if this channel is not the home dashboard for any facility.
+    """
+    info = dashboard_info.get(guild_id, {})
+    facilities = info.get("facilities", {})
+    for fname, fdata in facilities.items():
+        if fdata.get("tunnel_channel") == channel_id:
+            return fname
+    return None
+
+
 def normalize_dashboard_info():
+    """
+    Normalize dashboard_info into the new structure:
+
+    dashboard_info[guild_id] = {
+        "facilities": {
+            "<facility_name>": {
+                "tunnel_channel": int,
+                "tunnel_message": int
+            },
+            ...
+        },
+        "orders_channel": int,
+        "orders_message": int,
+        "log_channel": int,
+        "leaderboard_channel": int,
+    }
+
+    Also migrates old top-level tunnel_channel/tunnel_message into a
+    single 'Legacy Facility'.
+    """
     changed = False
+
     for gid, info in dashboard_info.items():
 
-        # Fix tunnel dashboard keys
+        # Fix old tunnel keys
         if "channel" in info:
             info["tunnel_channel"] = info.pop("channel")
             changed = True
@@ -109,34 +195,28 @@ def normalize_dashboard_info():
             info["orders_message"] = info.pop("order_message")
             changed = True
 
+        # Ensure facilities sub-dict
+        facilities = info.setdefault("facilities", {})
+
+        # If we still have a single, old-style tunnel dashboard at the top level,
+        # move it into a 'Legacy Facility' facility.
+        if "tunnel_channel" in info or "tunnel_message" in info:
+            legacy_name = "Legacy Facility"
+            fac_cfg = facilities.setdefault(legacy_name, {})
+
+            if "tunnel_channel" in info:
+                fac_cfg["tunnel_channel"] = info.pop("tunnel_channel")
+                changed = True
+
+            if "tunnel_message" in info:
+                fac_cfg["tunnel_message"] = info.pop("tunnel_message")
+                changed = True
+
+            facilities[legacy_name] = fac_cfg
+            info["facilities"] = facilities
+
     if changed:
         save_data(DASH_FILE, dashboard_info)
-
-def catch_up_tunnels():
-    now = datetime.now(timezone.utc)
-    updated = False
-
-    for facility_name, facility_data in tunnels.items():
-        tun_dict = facility_data.get("tunnels", {})
-
-        for tunnel_name, tdata in tun_dict.items():
-            usage = tdata.get("usage_rate", 0)
-            last_str = tdata.get("last_updated")
-
-            if not last_str:
-                tdata["last_updated"] = now.isoformat()
-                continue
-
-            last = datetime.fromisoformat(last_str)
-            hours_passed = (now - last).total_seconds() / 3600
-
-            if hours_passed > 0 and usage > 0:
-                tdata["total_supplies"] = max(0, tdata["total_supplies"] - (usage * hours_passed))
-                tdata["last_updated"] = now.isoformat()
-                updated = True
-
-    if updated:
-        save_data(DATA_FILE, tunnels)
 
 # ============================================================
 # GLOBAL PERMISSIONS SYSTEM
@@ -371,7 +451,16 @@ class StackSubmitModal(discord.ui.Modal, title="Submit Stacks"):
     async def on_submit(self, interaction: discord.Interaction):
         stacks = int(self.amount.value)
         amount = stacks * 100
-        tunnels[self.tunnel_name]["total_supplies"] += amount
+
+        facility_name, tdata = find_tunnel(self.tunnel_name)
+        if not tdata:
+            await interaction.response.send_message(
+                f"❌ Tunnel **{self.tunnel_name}** not found.",
+                ephemeral=True
+            )
+            return
+
+        tdata["total_supplies"] = tdata.get("total_supplies", 0) + amount
 
         user_id = str(interaction.user.id)
         users[user_id] = users.get(user_id, 0) + amount
@@ -386,8 +475,8 @@ class StackSubmitModal(discord.ui.Modal, title="Submit Stacks"):
             target_name=self.tunnel_name,
             amount=amount
         )
-        
-        await refresh_dashboard(interaction.guild)
+
+        await refresh_dashboard(interaction.guild, facility_name)
         await interaction.response.send_message(
             f"🪣 Submitted {amount} supplies ({stacks} stacks) to **{self.tunnel_name}**.",
             ephemeral=True
@@ -417,12 +506,21 @@ class TunnelButton(Button):
             dashboard_info[guild_id] = {}
 
         async def done_callback(interaction: discord.Interaction):
-            tunnels[self.tunnel]["total_supplies"] += SUPPLY_INCREMENT
+            facility_name, tdata = find_tunnel(self.tunnel)
+            if not tdata:
+                await interaction.response.edit_message(
+                    content=f"❌ Tunnel **{self.tunnel}** no longer exists.",
+                    view=None
+                )
+                return
+
+            tdata["total_supplies"] = tdata.get("total_supplies", 0) + SUPPLY_INCREMENT
             user_id = str(interaction.user.id)
             users[user_id] = users.get(user_id, 0) + SUPPLY_INCREMENT
+
             save_data(DATA_FILE, tunnels)
             save_data(USER_FILE, users)
-            # 🧾 Add contribution and action logging
+
             log_contribution(interaction.user.id, "1500 (Done)", SUPPLY_INCREMENT, self.tunnel)
             await log_action(
                 interaction.guild,
@@ -431,7 +529,8 @@ class TunnelButton(Button):
                 target_name=self.tunnel,
                 amount=SUPPLY_INCREMENT
             )
-            await refresh_dashboard(interaction.guild)
+
+            await refresh_dashboard(interaction.guild, facility_name)
             await interaction.response.edit_message(
                 content=f"🪣 Added {SUPPLY_INCREMENT} supplies to **{self.tunnel}**!",
                 view=None
@@ -458,8 +557,9 @@ class TunnelButton(Button):
 
 class DashboardPaginator(discord.ui.View):
     """Combined paginated + interactive dashboard for tunnels."""
-    def __init__(self, tunnels, per_page=8):
+    def __init__(self, tunnels, facility_name: str | None = None, per_page=8):
         super().__init__(timeout=None)
+        self.facility_name = facility_name
         self.tunnels = list(tunnels.items())
         self.per_page = per_page
         self.page = 0
@@ -470,8 +570,13 @@ class DashboardPaginator(discord.ui.View):
     # Build the embed for the current page
     # -----------------------------------------
     def build_page_embed(self):
+        title = "🛠 Foxhole FAC Dashboard"
+        if self.facility_name:
+            title += f" — {self.facility_name}"
+        title += f" — Page {self.page + 1}/{self.total_pages}"
+
         embed = discord.Embed(
-            title=f"🛠 Foxhole FAC Dashboard — Page {self.page + 1}/{self.total_pages}",
+            title=title,
             color=0x00ff99,
             timestamp=datetime.now(timezone.utc)
         )
@@ -491,7 +596,9 @@ class DashboardPaginator(discord.ui.View):
                 inline=False
             )
 
-        embed.set_footer(text="Updated every 2 minutes. Use the buttons below to add supplies or navigate pages.")
+        embed.set_footer(
+            text="Updated every 2 minutes. Use the buttons below to add supplies or navigate pages."
+        )
         return embed
 
     # -----------------------------------------
@@ -499,7 +606,6 @@ class DashboardPaginator(discord.ui.View):
     # -----------------------------------------
     def build_page_buttons(self):
         """Clear and rebuild tunnel buttons for current page."""
-        # remove old items except nav buttons (we rebuild all)
         self.clear_items()
 
         # navigation buttons
@@ -508,16 +614,15 @@ class DashboardPaginator(discord.ui.View):
             discord.ui.Button(label="◀️", style=discord.ButtonStyle.gray, custom_id="nav_prev", row=0),
             discord.ui.Button(label="▶️", style=discord.ButtonStyle.gray, custom_id="nav_next", row=0),
             discord.ui.Button(label="⏭️", style=discord.ButtonStyle.gray, custom_id="nav_last", row=0),
-       ]
+        ]
         for b in nav_buttons:
-            self.add_item(b)     
+            self.add_item(b)
 
         # tunnel buttons for visible subset
         start = self.page * self.per_page
         end = start + self.per_page
         tunnels_per_row = 4
         for i, (name, _) in enumerate(self.tunnels[start:end]):
-            # use your existing TunnelButton class
             button = TunnelButton(name)
             button.row = 1 + (i // tunnels_per_row)
             self.add_item(button)
@@ -550,6 +655,51 @@ class DashboardPaginator(discord.ui.View):
             return False
 
         return True
+
+class MsuppDashboardModal(discord.ui.Modal, title="Create MSUPP Facility"):
+    def __init__(self, suggested_name: str, channel_id: int, guild_id: int):
+        super().__init__(title="Create MSUPP Facility")
+        self.channel_id = channel_id
+        self.guild_id = guild_id
+
+        self.facility_name_input = discord.ui.TextInput(
+            label="Facility name",
+            placeholder=suggested_name,
+            required=True,
+            max_length=100
+        )
+        self.add_item(self.facility_name_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        facility_name = self.facility_name_input.value.strip() or self.facility_name_input.placeholder
+        guild_id_str = str(self.guild_id)
+        guild = interaction.guild
+        channel = guild.get_channel(self.channel_id)
+
+        facility_record = get_facility_record(facility_name)
+        fac_tunnels = facility_record["tunnels"]
+
+        if guild_id_str not in dashboard_info:
+            dashboard_info[guild_id_str] = {}
+        info = dashboard_info[guild_id_str]
+        facilities = info.setdefault("facilities", {})
+
+        paginator = DashboardPaginator(fac_tunnels, facility_name=facility_name)
+        msg = await channel.send(embed=paginator.build_page_embed(), view=paginator)
+
+        facilities[facility_name] = {
+            "tunnel_channel": channel.id,
+            "tunnel_message": msg.id
+        }
+        info["facilities"] = facilities
+        dashboard_info[guild_id_str] = info
+        save_data(DASH_FILE, dashboard_info)
+
+        await interaction.response.send_message(
+            f"✅ MSUPP dashboard for **{facility_name}** created in {channel.mention}.",
+            ephemeral=True
+        )
+
 
 # ============================================================
 # EMBED BUILDERS
@@ -596,46 +746,64 @@ def build_dashboard_embed():
     embed.set_footer(text="🕒 Updated every 2 minutes.")
     return embed
 
-async def refresh_dashboard(guild: discord.Guild):
-    """Edit or recreate the persistent tunnel dashboard message."""
+async def refresh_msupp_dashboard(guild: discord.Guild, facility_name: str):
+    """Edit or recreate the persistent tunnel dashboard message for a single facility."""
     guild_id = str(guild.id)
-    info = dashboard_info.get(guild_id)
+    info = dashboard_info.get(guild_id, {})
+    facilities = info.get("facilities", {})
+    fac_cfg = facilities.get(facility_name)
 
-    if not info:
-        print(f"[INFO] No dashboard info found for guild {guild.name}")
+    if not fac_cfg:
+        print(f"[INFO] No facility '{facility_name}' dashboard info for guild {guild.name}")
         return
 
-    channel_id = info.get("tunnel_channel")
-    msg_id = info.get("tunnel_message")
+    channel_id = fac_cfg.get("tunnel_channel")
+    msg_id = fac_cfg.get("tunnel_message")
 
     if not channel_id or not msg_id:
-        print(f"[INFO] No tunnel dashboard data for {guild.name}")
+        print(f"[INFO] Facility '{facility_name}' missing tunnel_channel/message in guild {guild.name}")
         return
-        
+
     channel = guild.get_channel(channel_id)
     if not channel:
-        print(f"[WARN] Tunnel dashboard channel missing for {guild.name}")
+        print(f"[WARN] Tunnel dashboard channel missing for facility '{facility_name}' in {guild.name}")
         return
-        
-    paginator = DashboardPaginator(tunnels)
+
+    facility_tunnels = get_facility_tunnels(facility_name)
+    paginator = DashboardPaginator(facility_tunnels, facility_name=facility_name)
 
     try:
         msg = await channel.fetch_message(msg_id)
         await msg.edit(embed=paginator.build_page_embed(), view=paginator)
-        return
-        
     except discord.NotFound:
-        # recreate
         new_msg = await channel.send(embed=paginator.build_page_embed(), view=paginator)
-        dashboard_info[guild_id] = {
-            "tunnel_channel": channel.id,
-            "tunnel_message": new_msg.id
-        }
+        fac_cfg["tunnel_channel"] = new_msg.channel.id
+        fac_cfg["tunnel_message"] = new_msg.id
+        facilities[facility_name] = fac_cfg
+        info["facilities"] = facilities
+        dashboard_info[guild_id] = info
         save_data(DASH_FILE, dashboard_info)
-        print(f"[RECOVERY] Dashboard recreated in {guild.name}")
-        return     
+        print(f"[RECOVERY] Dashboard for facility '{facility_name}' recreated in {guild.name}")
     except Exception as inner_e:
-        print(f"[FATAL] Could not recreate dashboard: {inner_e}")
+        print(f"[FATAL] Could not recreate dashboard for facility '{facility_name}' in {guild.name}: {inner_e}")
+
+
+async def refresh_dashboard(guild: discord.Guild, facility_name: str | None = None):
+    """
+    Backwards-compatible wrapper:
+    - If facility_name is provided, refresh that facility.
+    - Else, refresh all known facilities in this guild.
+    """
+    guild_id = str(guild.id)
+    info = dashboard_info.get(guild_id, {})
+    facilities = info.get("facilities", {})
+
+    if facility_name:
+        await refresh_msupp_dashboard(guild, facility_name)
+        return
+
+    for fname in facilities.keys():
+        await refresh_msupp_dashboard(guild, fname)
 
 # ============================================================
 # ORDER DASHBOARD VIEW
@@ -1110,7 +1278,24 @@ async def on_ready():
 @bot.tree.command(name="addtunnel", description="Add a new tunnel.")
 async def addtunnel(interaction: discord.Interaction, name: str, total_supplies: int, usage_rate: int, location: str = "Unknown"):
     await interaction.response.defer(ephemeral=True)
-    tunnels[name] = {
+
+    guild_id = str(interaction.guild_id)
+    channel_id = interaction.channel.id
+
+    # Try to bind to a facility based on this channel, else pick a sensible default
+    facility_name = get_facility_for_channel(guild_id, channel_id)
+    if not facility_name:
+        if tunnels:
+            # If we already have facilities, default to the first one
+            facility_name = next(iter(tunnels.keys()))
+        else:
+            # New guild / no facilities yet: use channel/thread name as initial facility name
+            facility_name = interaction.channel.name or "New Facility"
+
+    facility_record = get_facility_record(facility_name)
+    fac_tunnels = facility_record["tunnels"]
+
+    fac_tunnels[name] = {
         "total_supplies": total_supplies,
         "usage_rate": usage_rate,
         "location": location,
@@ -1118,16 +1303,23 @@ async def addtunnel(interaction: discord.Interaction, name: str, total_supplies:
     }
     save_data(DATA_FILE, tunnels)
 
-    guild_id = str(interaction.guild_id)
     if guild_id not in dashboard_info:
-        # First dashboard instance: create and store it
-        paginator = DashboardPaginator(tunnels)
+        dashboard_info[guild_id] = {}
+    info = dashboard_info[guild_id]
+    facilities = info.setdefault("facilities", {})
+
+    fac_cfg = facilities.get(facility_name)
+    if not fac_cfg or not fac_cfg.get("tunnel_message"):
+        # First dashboard instance for this facility: create and store it
+        paginator = DashboardPaginator(fac_tunnels, facility_name=facility_name)
         msg = await interaction.followup.send(embed=paginator.build_page_embed(), view=paginator)
-        dashboard_info[guild_id] = {
+
+        facilities[facility_name] = {
             "tunnel_channel": msg.channel.id,
             "tunnel_message": msg.id
         }
-
+        info["facilities"] = facilities
+        dashboard_info[guild_id] = info
         save_data(DASH_FILE, dashboard_info)
     else:
         await log_action(
@@ -1139,24 +1331,28 @@ async def addtunnel(interaction: discord.Interaction, name: str, total_supplies:
             details=f"Usage: {usage_rate}/hr"
         )
 
-        await refresh_dashboard(interaction.guild)
-        await interaction.followup.send(f"✅ Tunnel **{name}** added and dashboard updated.", ephemeral=True)
+        await refresh_msupp_dashboard(interaction.guild, facility_name)
+        await interaction.followup.send(
+            f"✅ Tunnel **{name}** added to facility **{facility_name}** and dashboard updated.",
+            ephemeral=True
+        )
 
 @bot.tree.command(name="addsupplies", description="Add supplies to a tunnel and record contribution.")
 async def addsupplies(interaction: discord.Interaction, name: str, amount: int):
     await interaction.response.defer(ephemeral=True)
 
-    if name not in tunnels:
+    facility_name, tdata = find_tunnel(name)
+    if not tdata:
         await interaction.followup.send(f"❌ Tunnel **{name}** not found.", ephemeral=True)
         return
 
-    tunnels[name]["total_supplies"] += amount
+    tdata["total_supplies"] = tdata.get("total_supplies", 0) + amount
     uid = str(interaction.user.id)
     users[uid] = users.get(uid, 0) + amount
 
     save_data(DATA_FILE, tunnels)
     save_data(USER_FILE, users)
-    await refresh_dashboard(interaction.guild)
+    await refresh_dashboard(interaction.guild, facility_name)
 
     log_contribution(interaction.user.id, "add supplies", amount, name)
     await log_action(
@@ -1179,53 +1375,61 @@ async def updatetunnel(
 ):
     await interaction.response.defer(ephemeral=True)
 
-    if name not in tunnels:
+    facility_name, tdata = find_tunnel(name)
+    if not tdata:
         await interaction.followup.send(f"❌ Tunnel **{name}** not found.", ephemeral=True)
         return
 
     # Update only provided fields
     if supplies is not None:
-        tunnels[name]["total_supplies"] = supplies
+        tdata["total_supplies"] = supplies
     if usage_rate is not None:
-        tunnels[name]["usage_rate"] = usage_rate
+        tdata["usage_rate"] = usage_rate
     if location is not None:
-        tunnels[name]["location"] = location
+        tdata["location"] = location
 
-    # Read back safe values
-    total_supplies = tunnels[name].get("total_supplies", 0)
-    current_rate   = tunnels[name].get("usage_rate", 0)
-    current_loc    = tunnels[name].get("location", "Unknown")
+    total_supplies = tdata.get("total_supplies", 0)
+    current_rate = tdata.get("usage_rate", 0)
 
     save_data(DATA_FILE, tunnels)
-    await refresh_dashboard(interaction.guild)
+    await refresh_dashboard(interaction.guild, facility_name)
 
     await log_action(
         interaction.guild,
         interaction.user,
         "updated tunnel",
         target_name=name,
-        amount=tunnels[name]["total_supplies"],
-        details=f"Rate: {tunnels[name]['usage_rate']}/hr"
+        amount=total_supplies,
+        details=f"Rate: {current_rate}/hr"
     )
 
     await interaction.followup.send(f"✅ Tunnel **{name}** updated successfully.", ephemeral=True)
 
-@bot.tree.command(name="dashboard", description="Show or bind the persistent dashboard.")
-async def dashboard(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    gid = str(interaction.guild_id)
-    if gid in dashboard_info:
-        await refresh_dashboard(interaction.guild)
-        await interaction.followup.send("🔁 Dashboard refreshed.", ephemeral=True)
+@bot.tree.command(name="msupp_dashboard", description="Create or refresh an MSUPP dashboard for this facility/thread.")
+async def msupp_dashboard(interaction: discord.Interaction):
+    """
+    - If this channel/thread already has a facility dashboard: refresh it.
+    - Otherwise: open a modal, suggesting the thread name as the facility name.
+    """
+    channel = interaction.channel
+    guild = interaction.guild
+    guild_id = str(guild.id)
+    channel_id = channel.id
+
+    # If this channel is already bound to a facility, refresh only that one
+    existing_facility_name = get_facility_for_channel(guild_id, channel_id)
+    if existing_facility_name:
+        await refresh_msupp_dashboard(guild, existing_facility_name)
+        await interaction.response.send_message(
+            f"🔁 Refreshed MSUPP dashboard for **{existing_facility_name}**.",
+            ephemeral=True
+        )
         return
-    paginator = DashboardPaginator(tunnels)
-    msg = await interaction.followup.send(embed=paginator.build_page_embed(), view=paginator)
-    dashboard_info[gid] = {
-        "tunnel_channel": msg.channel.id,
-        "tunnel_message": msg.id
-    }
-    save_data(DASH_FILE, dashboard_info)
-    await interaction.followup.send("✅ Dashboard created and bound to this channel.", ephemeral=True)
+
+    # No facility bound yet → open modal with thread/channel name as the suggestion
+    suggested = channel.name or "New MSUPP Facility"
+    modal = MsuppDashboardModal(suggested_name=suggested, channel_id=channel_id, guild_id=guild.id)
+    await interaction.response.send_modal(modal)
 
 @bot.tree.command(name="leaderboard", description="Show current contributors.")
 async def leaderboard(interaction: discord.Interaction):
@@ -1312,13 +1516,16 @@ async def deletetunnel(interaction: discord.Interaction, name: str):
         await interaction.followup.send("🚫 You do not have permission to use this command.", ephemeral=True)
         return
 
-    if name not in tunnels:
+    facility_name, tdata = find_tunnel(name)
+    if not tdata:
         await interaction.followup.send(f"❌ Tunnel **{name}** not found.", ephemeral=True)
         return
 
-    del tunnels[name]
+    # Remove from its facility
+    facility_record = get_facility_record(facility_name)
+    facility_record["tunnels"].pop(name, None)
     save_data(DATA_FILE, tunnels)
-    await refresh_dashboard(interaction.guild)
+    await refresh_dashboard(interaction.guild, facility_name)
 
     await log_action(
         interaction.guild,
@@ -1327,8 +1534,10 @@ async def deletetunnel(interaction: discord.Interaction, name: str):
         target_name=name
     )
 
-    await interaction.followup.send(f"🗑️ Tunnel **{name}** deleted successfully and dashboard updated.", ephemeral=True)
-
+    await interaction.followup.send(
+        f"🗑️ Tunnel **{name}** deleted successfully and dashboard updated.",
+        ephemeral=True
+    )
 
 @bot.tree.command(name="endwar", description="Officer-only: reset all MSUPP facilities, tunnels, and orders.")
 async def endwar(interaction: discord.Interaction):
@@ -1622,23 +1831,23 @@ async def order_delete(interaction: discord.Interaction, order_id: int):
 
 @tasks.loop(minutes=2)
 async def refresh_dashboard_loop():
-    # apply usage decay first
+    # apply usage decay first (per facility)
     for facility_data in tunnels.values():
-        for tdata in facility_data["tunnels"].values():
+        tun_dict = facility_data.get("tunnels", {})
+        for tdata in tun_dict.values():
             rate = tdata.get("usage_rate", 0)
             if rate > 0:
                 tdata["total_supplies"] = max(0, tdata["total_supplies"] - rate / 30)
 
     save_data(DATA_FILE, tunnels)
 
-    # update dashboards
+    # update dashboards per facility
     for guild in bot.guilds:
         gid = str(guild.id)
-        facilities = dashboard_info.get(gid, {})
-
-        for facility_name, data in facilities.items():
-            if "tunnel_channel" in data:
-                await refresh_msupp_dashboard(guild, facility_name)
+        info = dashboard_info.get(gid, {})
+        facilities = info.get("facilities", {})
+        for facility_name in facilities.keys():
+            await refresh_msupp_dashboard(guild, facility_name)
 
 @tasks.loop(time=time(hour=12, tzinfo=timezone.utc))
 async def weekly_leaderboard():
