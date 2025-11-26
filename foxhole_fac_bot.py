@@ -154,6 +154,45 @@ def get_facility_for_channel(guild_id: str, channel_id: int) -> str | None:
             return fname
     return None
 
+async def tunnel_name_autocomplete_impl(
+    interaction: discord.Interaction,
+    current: str
+):
+    """
+    Shared autocomplete helper for tunnel name fields.
+    - If the current channel is bound to a facility dashboard: only show that facility's tunnels.
+    - Otherwise: show all unique tunnel names across facilities.
+    """
+    guild_id = str(interaction.guild_id) if interaction.guild_id else None
+    channel = interaction.channel
+    facility_name = None
+
+    if guild_id and hasattr(channel, "id"):
+        facility_name = get_facility_for_channel(guild_id, channel.id)
+
+    names = []
+    if facility_name:
+        tun_dict = get_facility_tunnels(facility_name)
+        names = list(tun_dict.keys())
+    else:
+        # Fallback: unique tunnel names across all facilities
+        seen = set()
+        for fac in tunnels.values():
+            for tname in fac.get("tunnels", {}):
+                if tname not in seen:
+                    seen.add(tname)
+                    names.append(tname)
+
+    current_lower = current.lower()
+    choices: list[app_commands.Choice[str]] = []
+    for tname in names:
+        if current_lower in tname.lower():
+            choices.append(app_commands.Choice(name=tname, value=tname))
+            if len(choices) >= 25:
+                break
+
+    return choices
+
 def normalize_dashboard_info():
     """
     Normalize dashboard_info into the new structure:
