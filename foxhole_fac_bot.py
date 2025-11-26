@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands, tasks
 from discord.ui import View, Button
+from discord import app_commands
 from datetime import datetime, timezone, time
 import json
 import os
@@ -153,7 +154,6 @@ def get_facility_for_channel(guild_id: str, channel_id: int) -> str | None:
             return fname
     return None
 
-
 def normalize_dashboard_info():
     """
     Normalize dashboard_info into the new structure:
@@ -217,6 +217,44 @@ def normalize_dashboard_info():
 
     if changed:
         save_data(DASH_FILE, dashboard_info)
+
+def catch_up_tunnels():
+    """
+    Apply offline usage decay if the bot was down for a while.
+    Uses per-facility nested tunnel structure.
+    """
+    now = datetime.now(timezone.utc)
+    updated = False
+
+    for facility_name, facility_data in tunnels.items():
+        tun_dict = facility_data.get("tunnels", {})
+
+        for tunnel_name, tdata in tun_dict.items():
+            usage = tdata.get("usage_rate", 0)
+            last_str = tdata.get("last_updated")
+
+            if not last_str:
+                tdata["last_updated"] = now.isoformat()
+                continue
+
+            try:
+                last = datetime.fromisoformat(last_str)
+            except Exception:
+                tdata["last_updated"] = now.isoformat()
+                continue
+
+            hours_passed = (now - last).total_seconds() / 3600
+
+            if hours_passed > 0 and usage > 0:
+                tdata["total_supplies"] = max(
+                    0,
+                    tdata.get("total_supplies", 0) - (usage * hours_passed)
+                )
+                tdata["last_updated"] = now.isoformat()
+                updated = True
+
+    if updated:
+        save_data(DATA_FILE, tunnels)
 
 # ============================================================
 # GLOBAL PERMISSIONS SYSTEM
