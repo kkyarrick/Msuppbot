@@ -28,6 +28,53 @@ if not TOKEN:
     raise ValueError("❌ No DISCORD_TOKEN found in environment variables.")
 
 # ============================================================
+# ARCHIVE SYSTEM
+# ============================================================
+from pathlib import Path
+ARCHIVE_DIR = Path("data/archives")
+def ensure_archive_root():
+    ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+def create_war_archive_folder(timestamp_str: str) -> Path:
+    ensure_archive_root()
+    folder = ARCHIVE_DIR / timestamp_str
+    folder.mkdir(exist_ok=True)
+    return folder
+
+def export_json(path: Path, data: dict):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4)
+
+def generate_markdown_report(
+    path: Path,
+    guild_name: str,
+    war_end_time: str,
+    facility_count: int,
+    tunnel_count: int,
+    total_supplies: int,
+    sorted_contribs: list,
+    guild: discord.Guild
+):
+    lines = []
+    lines.append(f"# 🏁 Foxhole MSUPP — End of War Report\n")
+    lines.append(f"**Server:** {guild_name}")
+    lines.append(f"**Date:** {war_end_time}")
+    lines.append(f"**Facilities Operated:** {facility_count}")
+    lines.append(f"**Tunnels Managed:** {tunnel_count}")
+    lines.append(f"**Total Supplies Delivered:** {total_supplies:,}\n")
+    lines.append("## 🥇 Top Contributors")
+    if sorted_contribs:
+        for i, (uid, amt) in enumerate(sorted_contribs):
+            member = guild.get_member(int(uid))
+            name = member.display_name if member else f"User {uid}"
+            lines.append(f"{i+1}. **{name}** — {amt:,}")
+    else:
+        lines.append("_No contributions this war._")
+    lines.append("")
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+# ============================================================
 # DATA MANAGEMENT
 # ============================================================
 
@@ -1730,6 +1777,47 @@ async def endwar(interaction: discord.Interaction):
         await interaction.followup.send("🚫 You do not have permission.", ephemeral=True)
         return
 
+# ============================================================
+# 1️⃣ ARCHIVE SNAPSHOT BEFORE RESET
+# ============================================================
+
+    war_end_time = datetime.now(timezone.utc)
+    timestamp_str = war_end_time.strftime("%Y-%m-%d_%H-%M-%S_UTC")
+    archive_folder = create_war_archive_folder(timestamp_str)
+
+    # Save current state
+    export_json(archive_folder / "tunnels.json", tunnels)
+    export_json(archive_folder / "dashboard.json", dashboard_info)
+    export_json(archive_folder / "orders.json", load_data(ORDERS_FILE, {}))
+    export_json(archive_folder / "users.json", users)
+    export_json(archive_folder / "contributions.json", contributions)
+
+    # Build summary before reset
+    total_supplies = sum(users.values())
+    sorted_contribs = sorted(users.items(), key=lambda x: x[1], reverse=True)
+    facility_count = len(tunnels)
+    tunnel_count = sum(len(f.get("tunnels", {})) for f in tunnels.values())
+
+    export_json(archive_folder / "war_summary.json", {
+        "facility_count": facility_count,
+        "tunnel_count": tunnel_count,
+        "total_supplies": total_supplies,
+        "leaderboard": sorted_contribs,
+        "timestamp": war_end_time.isoformat()
+    })
+
+    # Write MD report
+    generate_markdown_report(
+        archive_folder / "war_report.md",
+        interaction.guild.name,
+        war_end_time.strftime("%Y-%m-%d %H:%M UTC"),
+        facility_count,
+        tunnel_count,
+        total_supplies,
+        sorted_contribs,
+        interaction.guild
+    )   
+
     guild = interaction.guild
     guild_id = str(guild.id)
 
@@ -2056,7 +2144,9 @@ async def help_command(interaction: discord.Interaction):
     # 3️⃣ Wipe ALL facility + tunnel data
     # -------------------------------
     tunnels.clear()
-    users.clear()
+    # Only reset contributions; preserve users
+    for uid in users:
+        users[uid] = 0
     save_data(DATA_FILE, tunnels)
     save_data(USER_FILE, users)
 
