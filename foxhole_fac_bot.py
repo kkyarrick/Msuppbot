@@ -1480,6 +1480,14 @@ async def addtunnel(interaction: discord.Interaction, name: str, total_supplies:
     facility_record = get_facility_record(facility_name)
     fac_tunnels = facility_record["tunnels"]
 
+    if name in fac_tunnels:
+        await interaction.followup.send(
+            f"❌ A tunnel named **{name}** already exists in facility **{facility_name}**.\n"
+            f"Use `/updatetunnel` to modify it instead.",
+            ephemeral=True
+        )
+        return
+
     fac_tunnels[name] = {
         "total_supplies": total_supplies,
         "usage_rate": usage_rate,
