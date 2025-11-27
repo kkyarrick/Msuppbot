@@ -1026,17 +1026,12 @@ async def refresh_dashboard(guild: discord.Guild, facility_name: str | None = No
     guild_id = str(guild.id)
     info = dashboard_info.get(guild_id, {})
     facilities = info.get("facilities", {})
-    fac_record = get_facility_record(facility_name)
-    normalize_facility_record(facility_name, fac_record)
-
     if facility_name:
         await refresh_msupp_dashboard(guild, facility_name)
         return
 
     for fname in facilities.keys():
         await refresh_msupp_dashboard(guild, fname)
-
-    save_data(DASH_FILE, dashboard_info)
 
 # ============================================================
 # ORDER DASHBOARD VIEW
@@ -1558,9 +1553,6 @@ async def addsupplies(interaction: discord.Interaction, name: str, amount: int):
         await interaction.followup.send(f"❌ Tunnel **{name}** not found.", ephemeral=True)
         return
 
-    normalize_facility_record(facility_name, facility_record)
-    save_data(DASH_FILE, dashboard_info)
-
     tdata["total_supplies"] = tdata.get("total_supplies", 0) + amount
     uid = str(interaction.user.id)
     users[uid] = users.get(uid, 0) + amount
@@ -1621,9 +1613,6 @@ async def updatetunnel(
     if not tdata:
         await interaction.followup.send(f"❌ Tunnel **{name}** not found.", ephemeral=True)
         return
-
-    normalize_facility_record(facility_name, facility_record)
-    save_data(DASH_FILE, dashboard_info)
     
     # Update only provided fields
     if supplies is not None:
@@ -1681,13 +1670,6 @@ async def msupp_dashboard(interaction: discord.Interaction):
     suggested = channel.name or "New MSUPP Facility"
     modal = MsuppDashboardModal(suggested_name=suggested, channel_id=channel_id, guild_id=guild.id)
     await interaction.response.send_modal(modal)
-
-    # Apply full hybrid normalization
-    normalize_facility_record(
-        facility_name,
-        facilities[facility_name],
-        creator_id=interaction.user.id
-    )
 
 @bot.tree.command(name="order_dashboard", description="Show or bind the order management dashboard.")
 async def order_dashboard(interaction: discord.Interaction):
@@ -1823,9 +1805,6 @@ async def deletetunnel(interaction: discord.Interaction, name: str):
         await interaction.followup.send(f"❌ Tunnel **{name}** not found.", ephemeral=True)
         return
         
-    normalize_facility_record(facility_name, facility_record)
-    save_data(DASH_FILE, dashboard_info)
-    
     # Remove from its facility
     facility_record["tunnels"].pop(name, None)
     save_data(DATA_FILE, tunnels)
