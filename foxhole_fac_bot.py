@@ -1683,11 +1683,11 @@ async def msupp_dashboard(interaction: discord.Interaction):
     await interaction.response.send_modal(modal)
 
     # Apply full hybrid normalization
-        normalize_facility_record(
-            facility_name,
-            facilities[facility_name],
-            creator_id=interaction.user.id
-        )
+    normalize_facility_record(
+        facility_name,
+        facilities[facility_name],
+        creator_id=interaction.user.id
+    )
 
 @bot.tree.command(name="order_dashboard", description="Show or bind the order management dashboard.")
 async def order_dashboard(interaction: discord.Interaction):
