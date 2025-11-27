@@ -1721,14 +1721,159 @@ async def deletetunnel_name_autocomplete(
 ):
     return await tunnel_name_autocomplete_impl(interaction, current)
 
-@bot.tree.command(name="endwar", description="Officer-only: reset all MSUPP facilities, tunnels, and orders.")
+@bot.tree.command(name="endwar", description="Officer-only: End the war, close all MSUPP facilities, and reset systems.")
 async def endwar(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
 
     officer_role = discord.utils.get(interaction.guild.roles, name="Officer")
     if not officer_role or officer_role not in interaction.user.roles:
-        await interaction.followup.send("🚫 You do not have permission to use this command.", ephemeral=True)
+        await interaction.followup.send("🚫 You do not have permission.", ephemeral=True)
         return
+
+    guild = interaction.guild
+    guild_id = str(guild.id)
+
+    # ============================================================
+    # 1️⃣ GATHER WAR SUMMARY BEFORE RESETTING ANY DATA
+    # ============================================================
+
+    # Total contributions (per-user)
+    total_contribs = {uid: amt for uid, amt in users.items() if amt > 0}
+
+    # Total supplies delivered overall
+    total_supplies = sum(total_contribs.values())
+
+    # Sort users for leaderboard
+    sorted_contribs = sorted(
+        total_contribs.items(), key=lambda x: x[1], reverse=True
+    )
+
+    # Facility/tunnel counts
+    facility_count = len(tunnels)
+    tunnel_count = sum(len(f["tunnels"]) for f in tunnels.values())
+
+    # Build summary lines
+    leaderboard_lines = []
+    rank = 1
+    for uid, amount in sorted_contribs[:10]:
+        member = guild.get_member(int(uid))
+        name = member.display_name if member else f"User {uid}"
+        leaderboard_lines.append(f"**{rank}. {name}** — {amount:,}")
+        rank += 1
+
+    leaderboard_text = "\n".join(leaderboard_lines) if leaderboard_lines else "_No contributors this war._"
+
+    # ============================================================
+    # 2️⃣ CLOSE ALL FACILITY DASHBOARDS
+    # ============================================================
+
+    info = dashboard_info.get(guild_id, {})
+    facilities = info.get("facilities", {})
+
+    for fac_name, fac_cfg in facilities.items():
+        chan_id = fac_cfg.get("tunnel_channel")
+        msg_id = fac_cfg.get("tunnel_message")
+
+        if not chan_id or not msg_id:
+            continue
+
+        channel = guild.get_channel(chan_id)
+        if not channel:
+            continue
+
+        try:
+            msg = await channel.fetch_message(msg_id)
+            closed_embed = discord.Embed(
+                title="🛑 Facility Closed — End of War",
+                description=(
+                    f"**{fac_name}** has been closed.\n"
+                    "All tunnels and supply data reset for the new war."
+                ),
+                color=discord.Color.red()
+            )
+            await msg.edit(embed=closed_embed, view=None)
+        except:
+            pass
+
+    # ============================================================
+    # 3️⃣ WIPE FACILITIES + TUNNEL DATA
+    # ============================================================
+
+    tunnels.clear()
+    info["facilities"] = {}
+    dashboard_info[guild_id] = info
+
+    save_data(DATA_FILE, tunnels)
+    save_data(DASH_FILE, dashboard_info)
+
+    # ============================================================
+    # 4️⃣ RESET CONTRIBUTIONS (BUT KEEP USERS)
+    # ============================================================
+
+    for uid in users:
+        users[uid] = 0  # reset only contribution amount
+
+    contributions.clear()
+
+    save_data(USER_FILE, users)
+    save_data(CONTRIB_FILE, contributions)
+
+    # ============================================================
+    # 5️⃣ WIPE ACTIVE ORDERS — PRESERVE ORDER DASHBOARD
+    # ============================================================
+
+    new_orders_data = {"next_id": 1, "orders": {}}
+    save_data(ORDER_FILE, new_orders_data)
+
+    if "orders_channel" in info and "orders_message" in info:
+        chan = guild.get_channel(info["orders_channel"])
+        if chan:
+            try:
+                msg = await chan.fetch_message(info["orders_message"])
+                order_embed, order_view = build_orders_dashboard()
+                await msg.edit(embed=order_embed, view=order_view)
+            except:
+                pass
+
+    # ============================================================
+    # 6️⃣ AUDIT LOG ENTRY (A2 FORMAT)
+    # ============================================================
+
+    await log_action(
+        guild=guild,
+        user=interaction.user,
+        action="ended the war",
+        target_name=f"{facility_count} facilities, {tunnel_count} tunnels",
+        details=f"Total supplies delivered: {total_supplies:,}"
+    )
+
+    # ============================================================
+    # 7️⃣ PUBLIC END-OF-WAR SUMMARY POST
+    # ============================================================
+
+    summary_embed = discord.Embed(
+        title="🏁 End of War — Final MSUPP Summary",
+        color=discord.Color.gold(),
+        timestamp=datetime.now(timezone.utc)
+    )
+
+    summary_embed.add_field(name="🏭 Facilities Operated", value=str(facility_count), inline=True)
+    summary_embed.add_field(name="🔧 Tunnels Managed", value=str(tunnel_count), inline=True)
+    summary_embed.add_field(name="📦 Total Supplies Delivered", value=f"{total_supplies:,}", inline=False)
+    summary_embed.add_field(name="🥇 Top Contributors", value=leaderboard_text, inline=False)
+
+    # Post summary to leaderboard channel if configured
+    lb_channel_id = info.get("leaderboard_channel")
+    if lb_channel_id:
+        ch = guild.get_channel(lb_channel_id)
+        if ch:
+            try:
+                await ch.send(embed=summary_embed)
+            except:
+                pass
+
+    # Ephemeral acknowledgement to officer
+    await interaction.followup.send("🏁 End of war completed. All systems reset.", ephemeral=True)
 
 @bot.tree.command(name="orders", description="Show the interactive order management dashboard.")
 async def orders(interaction: discord.Interaction):
