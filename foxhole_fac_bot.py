@@ -343,6 +343,67 @@ def catch_up_tunnels():
         save_data(DATA_FILE, tunnels)
 
 # ============================================================
+# HYBRID FACILITY NORMALIZATION (Phase 5 — Step 3A)
+# ============================================================
+
+REQUIRED_FACILITY_FIELDS = {
+    "facility_name": "",
+    "tunnels": {},
+    "tunnel_channel": 0,
+    "tunnel_message": 0,
+    "created_at": "",
+    "created_by": "",
+    "last_refresh": ""
+}
+
+def normalize_facility_record(name: str, record: dict, creator_id: str | None = None):
+    """
+    Ensures a facility record has all mandatory fields.
+    Optional / custom fields are preserved.
+    """
+    changed = False
+
+    # Always enforce the facility name field
+    if "facility_name" not in record:
+        record["facility_name"] = name
+        changed = True
+
+    for key, default in REQUIRED_FACILITY_FIELDS.items():
+        if key not in record:
+            # For creator_id override
+            if key == "created_by" and creator_id:
+                record[key] = str(creator_id)
+            # For timestamps
+            elif key in ("created_at", "last_refresh"):
+                record[key] = datetime.now(timezone.utc).isoformat()
+            else:
+                # Copy default of correct type
+                record[key] = default if not isinstance(default, (dict, list)) else default.copy()
+            changed = True
+
+    # Ensure tunnels exists and is a dict
+    if not isinstance(record.get("tunnels"), dict):
+        record["tunnels"] = {}
+        changed = True
+
+    return changed
+
+def normalize_all_facilities():
+    """
+    Normalizes all facilities in dashboard_info.
+    Called at startup.
+    """
+    changed = False
+
+    for guild_id, info in dashboard_info.items():
+        facs = info.get("facilities", {})
+        for fac_name, fac_record in facs.items():
+            if normalize_facility_record(fac_name, fac_record):
+                changed = True
+    if changed:
+        save_data(DASH_FILE, dashboard_info)
+
+# ============================================================
 # GLOBAL PERMISSIONS SYSTEM
 # ============================================================
 
@@ -965,6 +1026,8 @@ async def refresh_dashboard(guild: discord.Guild, facility_name: str | None = No
     guild_id = str(guild.id)
     info = dashboard_info.get(guild_id, {})
     facilities = info.get("facilities", {})
+    fac_record = get_facility_record(facility_name)
+    normalize_facility_record(facility_name, fac_record)
 
     if facility_name:
         await refresh_msupp_dashboard(guild, facility_name)
@@ -972,6 +1035,8 @@ async def refresh_dashboard(guild: discord.Guild, facility_name: str | None = No
 
     for fname in facilities.keys():
         await refresh_msupp_dashboard(guild, fname)
+
+    save_data(DASH_FILE, dashboard_info)
 
 # ============================================================
 # ORDER DASHBOARD VIEW
@@ -1385,6 +1450,7 @@ def build_clickable_order_dashboard():
 @bot.event
 async def on_ready():
     normalize_dashboard_info()
+    normalize_all_facilities()
     catch_up_tunnels()  # ✅ simulate supply loss while offline
     await bot.tree.sync()
     print(f"🔁 Synced slash commands for {len(bot.tree.get_commands())} commands.")
@@ -1492,6 +1558,9 @@ async def addsupplies(interaction: discord.Interaction, name: str, amount: int):
         await interaction.followup.send(f"❌ Tunnel **{name}** not found.", ephemeral=True)
         return
 
+    normalize_facility_record(facility_name, facility_record)
+    save_data(DASH_FILE, dashboard_info)
+
     tdata["total_supplies"] = tdata.get("total_supplies", 0) + amount
     uid = str(interaction.user.id)
     users[uid] = users.get(uid, 0) + amount
@@ -1553,6 +1622,9 @@ async def updatetunnel(
         await interaction.followup.send(f"❌ Tunnel **{name}** not found.", ephemeral=True)
         return
 
+    normalize_facility_record(facility_name, facility_record)
+    save_data(DASH_FILE, dashboard_info)
+    
     # Update only provided fields
     if supplies is not None:
         tdata["total_supplies"] = supplies
@@ -1609,6 +1681,13 @@ async def msupp_dashboard(interaction: discord.Interaction):
     suggested = channel.name or "New MSUPP Facility"
     modal = MsuppDashboardModal(suggested_name=suggested, channel_id=channel_id, guild_id=guild.id)
     await interaction.response.send_modal(modal)
+
+    # Apply full hybrid normalization
+        normalize_facility_record(
+            facility_name,
+            facilities[facility_name],
+            creator_id=interaction.user.id
+        )
 
 @bot.tree.command(name="order_dashboard", description="Show or bind the order management dashboard.")
 async def order_dashboard(interaction: discord.Interaction):
@@ -1743,7 +1822,10 @@ async def deletetunnel(interaction: discord.Interaction, name: str):
     if not tdata or not facility_name:
         await interaction.followup.send(f"❌ Tunnel **{name}** not found.", ephemeral=True)
         return
-
+        
+    normalize_facility_record(facility_name, facility_record)
+    save_data(DASH_FILE, dashboard_info)
+    
     # Remove from its facility
     facility_record["tunnels"].pop(name, None)
     save_data(DATA_FILE, tunnels)
