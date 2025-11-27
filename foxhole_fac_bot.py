@@ -1799,20 +1799,28 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(
         name="📦 Tunnel Management",
         value=(
-            "**/addtunnel** — Add a new tunnel with initial supplies and usage rate.\n"
-            "**/updatetunnel** — Update tunnel supplies, usage rate or location.\n"
-            "**/addsupplies** — Add a custom amount of supplies to a tunnel.\n"
+            "**/addtunnel** — Add a new tunnel to the current facility.\n"
+            "**/updatetunnel** — Update tunnel supplies, usage rate, or location.\n"
+            "**/addsupplies** — Add supplies to a tunnel.\n"
             "**/deletetunnel** *(Officer only)* — Remove a tunnel.\n"
         ),
         inline=False
     )
 
     embed.add_field(
-        name="📊 Dashboards",
+        name="🏭 MSUPP Facilities",
         value=(
-            "**/dashboard** — Show or refresh the tunnel dashboard.\n"
+            "**/msupp_dashboard** — Create or refresh a facility dashboard.\n"
+            "**(auto facility binding based on thread)**\n"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="📊 Orders Dashboard",
+        value=(
             "**/orders** — Show the interactive orders dashboard.\n"
-            "**/order_dashboard** — Create or refresh the bound orders dashboard.\n"
+            "**/order_dashboard** — Create/refresh the persistent order dashboard.\n"
         ),
         inline=False
     )
@@ -1829,8 +1837,8 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(
         name="📈 Contributions",
         value=(
-            "**/leaderboard** — Show current weekly top contributors.\n"
-            "**/stats** — View your personal supply contribution stats.\n"
+            "**/leaderboard** — Show weekly top contributors.\n"
+            "**/stats** — View your personal supply stats.\n"
         ),
         inline=False
     )
@@ -1838,7 +1846,7 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(
         name="⚔️ War Management",
         value=(
-            "**/endwar** *(Officer only)* — Post end-of-war summary & reset tunnel data.\n"
+            "**/endwar** *(Officer only)* — Post summary & reset all MSUPP data.\n"
         ),
         inline=False
     )
@@ -1846,8 +1854,8 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(
         name="⚙️ Configuration (Officer Only)",
         value=(
-            "**/setleaderboardchannel** — Set where weekly leaderboards are posted.\n"
-            "**/setlogchannel** — Set where FAC logs are posted.\n"
+            "**/setleaderboardchannel** — Set weekly leaderboard channel.\n"
+            "**/setlogchannel** — Set FAC audit log channel.\n"
         ),
         inline=False
     )
@@ -1855,13 +1863,13 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(
         name="🧪 Utility",
         value=(
-            "**/checkpermissions** — Check if the bot has all required permissions.\n"
+            "**/checkpermissions** — Check bot permissions.\n"
         ),
         inline=False
     )
 
     embed.set_footer(text="Use /help anytime for a clean list of available commands.")
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await interaction.response.send_message(embed=embed, ephemeral=True)    
     
     # -------------------------------
     # 1️⃣ Build End-of-War summary
