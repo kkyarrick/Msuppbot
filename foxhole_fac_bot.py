@@ -1992,8 +1992,8 @@ async def endwar(interaction: discord.Interaction):
     # ============================================================
 
     await log_action(
-        guild=guild,
-        user=interaction.user,
+        guild,
+        interaction.user,
         action="ended the war",
         target_name=f"{facility_count} facilities, {tunnel_count} tunnels",
         details=f"Total supplies delivered: {total_supplies:,}"
