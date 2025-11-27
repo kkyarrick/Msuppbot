@@ -529,7 +529,29 @@ class StackSubmitModal(discord.ui.Modal, title="Submit Stacks"):
         stacks = int(self.amount.value)
         amount = stacks * 100
 
-        facility_name, tdata = find_tunnel(self.tunnel_name)
+        guild_id = str(interaction.guild.id)
+        channel_id = interaction.channel.id
+
+        # Prefer facility bound to this channel
+        facility_name = get_facility_for_channel(guild_id, channel_id)
+        tdata = None
+
+        if facility_name:
+            fac_rec = get_facility_record(facility_name)
+            tdata = fac_rec["tunnels"].get(self.tunnel_name)
+            if not tdata:
+                # Tunnel exists elsewhere?
+                other_fac, _ = find_tunnel(self.tunnel_name)
+                if other_fac:
+                    await interaction.response.send_message(
+                        f"❌ Tunnel **{self.tunnel_name}** belongs to facility "
+                        f"**{other_fac}**. Please use that facility's dashboard thread.",
+                        ephemeral=True
+                    )
+                    return
+        else:
+            facility_name, tdata = find_tunnel(self.tunnel_name)
+
         if not tdata:
             await interaction.response.send_message(
                 f"❌ Tunnel **{self.tunnel_name}** not found.",
@@ -549,7 +571,7 @@ class StackSubmitModal(discord.ui.Modal, title="Submit Stacks"):
             interaction.guild,
             interaction.user,
             "added supplies",
-            target_name=self.tunnel_name,
+            target_name=f"[{facility_name}] {self.tunnel_name}" if facility_name else self.tunnel_name,
             amount=amount
         )
 
@@ -583,7 +605,32 @@ class TunnelButton(Button):
             dashboard_info[guild_id] = {}
 
         async def done_callback(interaction: discord.Interaction):
-            facility_name, tdata = find_tunnel(self.tunnel)
+
+            user_id = str(interaction.user.id)
+            users[user_id] = users.get(user_id, 0) + SUPPLY_INCREMENT
+            guild_id = str(interaction.guild.id)
+            channel_id = interaction.channel.id
+
+            facility_name = get_facility_for_channel(guild_id, channel_id)
+            tdata = None
+
+            if facility_name:
+                fac_rec = get_facility_record(facility_name)
+                tdata = fac_rec["tunnels"].get(self.tunnel)
+                if not tdata:
+                    other_fac, _ = find_tunnel(self.tunnel)
+                    if other_fac:
+                        await interaction.response.edit_message(
+                            content=(
+                                f"❌ Tunnel **{self.tunnel}** belongs to facility "
+                                f"**{other_fac}**. Please use that facility's dashboard thread."
+                            ),
+                            view=None
+                        )
+                        return
+            else:
+                facility_name, tdata = find_tunnel(self.tunnel)
+
             if not tdata:
                 await interaction.response.edit_message(
                     content=f"❌ Tunnel **{self.tunnel}** no longer exists.",
@@ -592,9 +639,6 @@ class TunnelButton(Button):
                 return
 
             tdata["total_supplies"] = tdata.get("total_supplies", 0) + SUPPLY_INCREMENT
-            user_id = str(interaction.user.id)
-            users[user_id] = users.get(user_id, 0) + SUPPLY_INCREMENT
-
             save_data(DATA_FILE, tunnels)
             save_data(USER_FILE, users)
 
@@ -603,7 +647,7 @@ class TunnelButton(Button):
                 interaction.guild,
                 interaction.user,
                 "added supplies",
-                target_name=self.tunnel,
+                target_name=f"[{facility_name}] {self.tunnel}" if facility_name else self.tunnel,
                 amount=SUPPLY_INCREMENT
             )
 
@@ -980,30 +1024,6 @@ async def refresh_order_dashboard(guild: discord.Guild):
     except Exception as e:
         print(f"[ERROR] Failed to refresh order dashboard in {guild.name}: {e}")
 
-# ------------------------------------------------------------
-# Command to Create or Refresh Dashboard
-# ------------------------------------------------------------
-@bot.tree.command(name="order_dashboard", description="Show or bind the order management dashboard.")
-async def order_dashboard(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-
-    guild_id = str(interaction.guild_id)
-    embed = build_order_dashboard()
-
-    if guild_id in dashboard_info and "orders_message" in dashboard_info[guild_id]:
-        await refresh_order_dashboard(interaction.guild)
-        await interaction.followup.send("🔁 Order dashboard refreshed.", ephemeral=True)
-        return
-
-    msg = await interaction.followup.send(embed=embed)
-    if guild_id not in dashboard_info:
-        dashboard_info[guild_id] = {}
-    dashboard_info[guild_id]["orders_channel"] = msg.channel.id
-    dashboard_info[guild_id]["orders_message"] = msg.id
-    save_data(DASH_FILE, dashboard_info)
-
-    await interaction.followup.send("✅ Order dashboard created and bound to this channel.", ephemeral=True)
-
 # ============================================================
 # AUTO-REFRESH ORDERS DASHBOARD (every 5 minutes)
 # ============================================================
@@ -1311,26 +1331,6 @@ def build_clickable_order_dashboard():
     embed.set_footer(text="💡 Click an Order ID below to manage it.")
     return embed
 
-
-# ============================================================
-# COMMAND TO SHOW THE CLICKABLE DASHBOARD
-# ============================================================
-@bot.tree.command(name="orders", description="Show the interactive order management dashboard.")
-async def orders(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=False)
-
-    view = OrderDashboardView()
-    embed = build_clickable_order_dashboard()
-    msg = await interaction.followup.send(embed=embed, view=view)
-
-    guild_id = str(interaction.guild_id)
-    if guild_id not in dashboard_info:
-        dashboard_info[guild_id] = {}
-
-    dashboard_info[guild_id]["orders_channel"] = msg.channel.id
-    dashboard_info[guild_id]["orders_message"] = msg.id
-    save_data(DASH_FILE, dashboard_info)
-
 # ============================================================
 # BOT EVENTS
 # ============================================================
@@ -1403,7 +1403,7 @@ async def addtunnel(interaction: discord.Interaction, name: str, total_supplies:
             interaction.guild,
             interaction.user,
             "added new tunnel",
-            target_name=name,
+            target_name=f"[{facility_name}] {name}" if facility_name else name,
             amount=total_supplies,
             details=f"Usage: {usage_rate}/hr"
         )
@@ -1417,8 +1417,30 @@ async def addtunnel(interaction: discord.Interaction, name: str, total_supplies:
 @bot.tree.command(name="addsupplies", description="Add supplies to a tunnel and record contribution.")
 async def addsupplies(interaction: discord.Interaction, name: str, amount: int):
     await interaction.response.defer(ephemeral=True)
+    
+    guild_id = str(interaction.guild_id)
+    channel_id = interaction.channel.id
 
-    facility_name, tdata = find_tunnel(name)
+    facility_from_channel = get_facility_for_channel(guild_id, channel_id)
+    facility_name = facility_from_channel
+    tdata = None
+
+    if facility_from_channel:
+        fac_rec = get_facility_record(facility_from_channel)
+        tdata = fac_rec["tunnels"].get(name)
+        if not tdata:
+            # Does this tunnel exist in another facility?
+            other_fac, _ = find_tunnel(name)
+            if other_fac:
+                await interaction.followup.send(
+                    f"❌ Tunnel **{name}** belongs to facility **{other_fac}**. "
+                    f"Please use that facility's MSUPP dashboard thread.",
+                    ephemeral=True
+                )
+                return
+    else:
+        facility_name, tdata = find_tunnel(name)
+
     if not tdata:
         await interaction.followup.send(f"❌ Tunnel **{name}** not found.", ephemeral=True)
         return
@@ -1436,11 +1458,18 @@ async def addsupplies(interaction: discord.Interaction, name: str, amount: int):
         interaction.guild,
         interaction.user,
         "added supplies",
-        target_name=name,
+        target_name=f"[{facility_name}] {name}" if facility_name else name,
         amount=amount
     )
 
     await interaction.followup.send(f"🪣 Added {amount:,} supplies to **{name}**.", ephemeral=True)
+
+@addsupplies.autocomplete("name")
+async def addsupplies_name_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+):
+    return await tunnel_name_autocomplete_impl(interaction, current)
 
 @bot.tree.command(name="updatetunnel", description="Update tunnel values without affecting leaderboard.")
 async def updatetunnel(
@@ -1451,8 +1480,28 @@ async def updatetunnel(
     location: str = None
 ):
     await interaction.response.defer(ephemeral=True)
+    guild_id = str(interaction.guild_id)
+    channel_id = interaction.channel.id
 
-    facility_name, tdata = find_tunnel(name)
+    facility_from_channel = get_facility_for_channel(guild_id, channel_id)
+    facility_name = facility_from_channel
+    tdata = None
+
+    if facility_from_channel:
+        fac_rec = get_facility_record(facility_from_channel)
+        tdata = fac_rec["tunnels"].get(name)
+        if not tdata:
+            other_fac, _ = find_tunnel(name)
+            if other_fac:
+                await interaction.followup.send(
+                    f"❌ Tunnel **{name}** belongs to facility **{other_fac}**. "
+                    f"Please use that facility's MSUPP dashboard thread.",
+                    ephemeral=True
+                )
+                return
+    else:
+        facility_name, tdata = find_tunnel(name)
+
     if not tdata:
         await interaction.followup.send(f"❌ Tunnel **{name}** not found.", ephemeral=True)
         return
@@ -1475,12 +1524,18 @@ async def updatetunnel(
         interaction.guild,
         interaction.user,
         "updated tunnel",
-        target_name=name,
+        target_name=f"[{facility_name}] {name}" if facility_name else name,
         amount=total_supplies,
         details=f"Rate: {current_rate}/hr"
     )
 
     await interaction.followup.send(f"✅ Tunnel **{name}** updated successfully.", ephemeral=True)
+@updatetunnel.autocomplete("name")
+async def updatetunnel_name_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+):
+    return await tunnel_name_autocomplete_impl(interaction, current)
 
 @bot.tree.command(name="msupp_dashboard", description="Create or refresh an MSUPP dashboard for this facility/thread.")
 async def msupp_dashboard(interaction: discord.Interaction):
@@ -1507,6 +1562,27 @@ async def msupp_dashboard(interaction: discord.Interaction):
     suggested = channel.name or "New MSUPP Facility"
     modal = MsuppDashboardModal(suggested_name=suggested, channel_id=channel_id, guild_id=guild.id)
     await interaction.response.send_modal(modal)
+
+@bot.tree.command(name="order_dashboard", description="Show or bind the order management dashboard.")
+async def order_dashboard(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+
+    guild_id = str(interaction.guild_id)
+    embed = build_order_dashboard()
+
+    if guild_id in dashboard_info and "orders_message" in dashboard_info[guild_id]:
+        await refresh_order_dashboard(interaction.guild)
+        await interaction.followup.send("🔁 Order dashboard refreshed.", ephemeral=True)
+        return
+
+    msg = await interaction.followup.send(embed=embed)
+    if guild_id not in dashboard_info:
+        dashboard_info[guild_id] = {}
+    dashboard_info[guild_id]["orders_channel"] = msg.channel.id
+    dashboard_info[guild_id]["orders_message"] = msg.id
+    save_data(DASH_FILE, dashboard_info)
+
+    await interaction.followup.send("✅ Order dashboard created and bound to this channel.", ephemeral=True)
 
 @bot.tree.command(name="leaderboard", description="Show current contributors.")
 async def leaderboard(interaction: discord.Interaction):
@@ -1593,13 +1669,35 @@ async def deletetunnel(interaction: discord.Interaction, name: str):
         await interaction.followup.send("🚫 You do not have permission to use this command.", ephemeral=True)
         return
 
-    facility_name, tdata = find_tunnel(name)
-    if not tdata:
+    guild_id = str(interaction.guild_id)
+    channel_id = interaction.channel.id
+
+    facility_from_channel = get_facility_for_channel(guild_id, channel_id)
+    facility_name = facility_from_channel
+    tdata = None
+
+    if facility_from_channel:
+        facility_record = get_facility_record(facility_from_channel)
+        tdata = facility_record["tunnels"].get(name)
+        if not tdata:
+            other_fac, _ = find_tunnel(name)
+            if other_fac:
+                await interaction.followup.send(
+                    f"❌ Tunnel **{name}** belongs to facility **{other_fac}**. "
+                    f"Please use that facility's MSUPP dashboard thread.",
+                    ephemeral=True
+                )
+                return
+    else:
+        facility_name, tdata = find_tunnel(name)
+        if facility_name:
+            facility_record = get_facility_record(facility_name)
+
+    if not tdata or not facility_name:
         await interaction.followup.send(f"❌ Tunnel **{name}** not found.", ephemeral=True)
         return
 
     # Remove from its facility
-    facility_record = get_facility_record(facility_name)
     facility_record["tunnels"].pop(name, None)
     save_data(DATA_FILE, tunnels)
     await refresh_dashboard(interaction.guild, facility_name)
@@ -1608,13 +1706,20 @@ async def deletetunnel(interaction: discord.Interaction, name: str):
         interaction.guild,
         interaction.user,
         "deleted tunnel",
-        target_name=name
+        target_name=f"[{facility_name}] {name}" if facility_name else name
     )
 
     await interaction.followup.send(
         f"🗑️ Tunnel **{name}** deleted successfully and dashboard updated.",
         ephemeral=True
     )
+
+@deletetunnel.autocomplete("name")
+async def deletetunnel_name_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+):
+    return await tunnel_name_autocomplete_impl(interaction, current)
 
 @bot.tree.command(name="endwar", description="Officer-only: reset all MSUPP facilities, tunnels, and orders.")
 async def endwar(interaction: discord.Interaction):
@@ -1625,86 +1730,21 @@ async def endwar(interaction: discord.Interaction):
         await interaction.followup.send("🚫 You do not have permission to use this command.", ephemeral=True)
         return
 
-    # -------------------------------
-    # 1️⃣ Build End-of-War summary
-    # -------------------------------
-    total_supplies = sum(users.values())
-    top = sorted(users.items(), key=lambda x: x[1], reverse=True)[:5]
+@bot.tree.command(name="orders", description="Show the interactive order management dashboard.")
+async def orders(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=False)
 
-    top_lines = []
-    for i, (uid, amt) in enumerate(top):
-        user = await bot.fetch_user(int(uid))
-        top_lines.append(f"**{i+1}.** {user.display_name} — {amt:,}")
+    view = OrderDashboardView()
+    embed = build_clickable_order_dashboard()
+    msg = await interaction.followup.send(embed=embed, view=view)
 
-    embed = discord.Embed(
-        title="⚔️ End of War Summary",
-        description=f"📦 **Total supplies contributed:** {total_supplies:,}\n\n"
-                    f"🏅 **Top Contributors:**\n" + ("\n".join(top_lines) or "No data."),
-        color=discord.Color.red(),
-        timestamp=datetime.now(timezone.utc)
-    )
+    guild_id = str(interaction.guild_id)
+    if guild_id not in dashboard_info:
+        dashboard_info[guild_id] = {}
 
-    # -------------------------------
-    # 2️⃣ Post summary
-    # -------------------------------
-    gid = str(interaction.guild.id)
-    info = dashboard_info.get(gid, {})
-
-    post_channel = None
-    if "leaderboard_channel" in info:
-        post_channel = interaction.guild.get_channel(info["leaderboard_channel"])
-
-    if not post_channel:
-        post_channel = discord.utils.get(interaction.guild.text_channels, name="logistics") or \
-                       discord.utils.get(interaction.guild.text_channels, name="general")
-
-    if post_channel:
-        await post_channel.send(embed=embed)
-
-    # -------------------------------
-    # 3️⃣ Wipe ALL facility + tunnel data
-    # -------------------------------
-    tunnels.clear()
-    users.clear()
-    save_data(DATA_FILE, tunnels)
-    save_data(USER_FILE, users)
-
-    # -------------------------------
-    # 4️⃣ Reset orders (but keep dashboard location)
-    # -------------------------------
-    global orders_data
-    orders_data = {"next_id": 1, "orders": {}}
-    save_orders()
-
-    # -------------------------------
-    # 5️⃣ Remove ONLY facility dashboards
-    # -------------------------------
-    if gid in dashboard_info:
-        preserve = {
-            "orders_channel": dashboard_info[gid].get("orders_channel"),
-            "orders_message": dashboard_info[gid].get("orders_message"),
-            "log_channel": dashboard_info[gid].get("log_channel"),
-            "leaderboard_channel": dashboard_info[gid].get("leaderboard_channel")
-        }
-        dashboard_info[gid] = {k: v for k, v in preserve.items() if v}
-        save_data(DASH_FILE, dashboard_info)
-
-    # -------------------------------
-    # 6️⃣ Final confirmation
-    # -------------------------------
-    await interaction.followup.send("✅ End of War complete. All data reset.", ephemeral=True)
-
-@bot.tree.command(name="checkpermissions", description="Check the bot's permissions in this channel.")
-async def checkpermissions(interaction: discord.Interaction):
-    perms = interaction.channel.permissions_for(interaction.guild.me)
-    results = [
-        f"👁️ View Channel: {'✅' if perms.view_channel else '❌'}",
-        f"💬 Send Messages: {'✅' if perms.send_messages else '❌'}",
-        f"🔗 Embed Links: {'✅' if perms.embed_links else '❌'}",
-        f"📜 Read History: {'✅' if perms.read_message_history else '❌'}",
-        f"⚙️ Slash Commands: {'✅' if perms.use_application_commands else '❌'}",
-    ]
-    await interaction.response.send_message("\n".join(results), ephemeral=True)
+    dashboard_info[guild_id]["orders_channel"] = msg.channel.id
+    dashboard_info[guild_id]["orders_message"] = msg.id
+    save_data(DASH_FILE, dashboard_info)
 
 @bot.tree.command(name="setleaderboardchannel", description="Set the channel where weekly leaderboards will be posted.")
 async def setleaderboardchannel(interaction: discord.Interaction, channel: discord.TextChannel):
@@ -1823,6 +1863,87 @@ async def help_command(interaction: discord.Interaction):
     embed.set_footer(text="Use /help anytime for a clean list of available commands.")
     await interaction.response.send_message(embed=embed, ephemeral=True)
     
+    # -------------------------------
+    # 1️⃣ Build End-of-War summary
+    # -------------------------------
+    total_supplies = sum(users.values())
+    top = sorted(users.items(), key=lambda x: x[1], reverse=True)[:5]
+
+    top_lines = []
+    for i, (uid, amt) in enumerate(top):
+        user = await bot.fetch_user(int(uid))
+        top_lines.append(f"**{i+1}.** {user.display_name} — {amt:,}")
+
+    embed = discord.Embed(
+        title="⚔️ End of War Summary",
+        description=f"📦 **Total supplies contributed:** {total_supplies:,}\n\n"
+                    f"🏅 **Top Contributors:**\n" + ("\n".join(top_lines) or "No data."),
+        color=discord.Color.red(),
+        timestamp=datetime.now(timezone.utc)
+    )
+
+    # -------------------------------
+    # 2️⃣ Post summary
+    # -------------------------------
+    gid = str(interaction.guild.id)
+    info = dashboard_info.get(gid, {})
+
+    post_channel = None
+    if "leaderboard_channel" in info:
+        post_channel = interaction.guild.get_channel(info["leaderboard_channel"])
+
+    if not post_channel:
+        post_channel = discord.utils.get(interaction.guild.text_channels, name="logistics") or \
+                       discord.utils.get(interaction.guild.text_channels, name="general")
+
+    if post_channel:
+        await post_channel.send(embed=embed)
+
+    # -------------------------------
+    # 3️⃣ Wipe ALL facility + tunnel data
+    # -------------------------------
+    tunnels.clear()
+    users.clear()
+    save_data(DATA_FILE, tunnels)
+    save_data(USER_FILE, users)
+
+    # -------------------------------
+    # 4️⃣ Reset orders (but keep dashboard location)
+    # -------------------------------
+    global orders_data
+    orders_data = {"next_id": 1, "orders": {}}
+    save_orders()
+
+    # -------------------------------
+    # 5️⃣ Remove ONLY facility dashboards
+    # -------------------------------
+    if gid in dashboard_info:
+        preserve = {
+            "orders_channel": dashboard_info[gid].get("orders_channel"),
+            "orders_message": dashboard_info[gid].get("orders_message"),
+            "log_channel": dashboard_info[gid].get("log_channel"),
+            "leaderboard_channel": dashboard_info[gid].get("leaderboard_channel")
+        }
+        dashboard_info[gid] = {k: v for k, v in preserve.items() if v}
+        save_data(DASH_FILE, dashboard_info)
+
+    # -------------------------------
+    # 6️⃣ Final confirmation
+    # -------------------------------
+    await interaction.followup.send("✅ End of War complete. All data reset.", ephemeral=True)
+
+@bot.tree.command(name="checkpermissions", description="Check the bot's permissions in this channel.")
+async def checkpermissions(interaction: discord.Interaction):
+    perms = interaction.channel.permissions_for(interaction.guild.me)
+    results = [
+        f"👁️ View Channel: {'✅' if perms.view_channel else '❌'}",
+        f"💬 Send Messages: {'✅' if perms.send_messages else '❌'}",
+        f"🔗 Embed Links: {'✅' if perms.embed_links else '❌'}",
+        f"📜 Read History: {'✅' if perms.read_message_history else '❌'}",
+        f"⚙️ Slash Commands: {'✅' if perms.use_application_commands else '❌'}",
+    ]
+    await interaction.response.send_message("\n".join(results), ephemeral=True)
+
 # ============================================================
 # ORDERS SYSTEM
 # ============================================================
