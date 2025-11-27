@@ -1992,17 +1992,20 @@ async def endwar(interaction: discord.Interaction):
     # 5️⃣ WIPE ACTIVE ORDERS — PRESERVE ORDER DASHBOARD
     # ============================================================
 
-    new_orders_data = {"next_id": 1, "orders": {}}
-    save_data(ORDER_FILE, new_orders_data)
+    # Reset all active orders but keep the dashboard location
+    global orders_data
+    orders_data = {"next_id": 1, "orders": {}}
+    save_orders()
 
     if "orders_channel" in info and "orders_message" in info:
         chan = guild.get_channel(info["orders_channel"])
         if chan:
             try:
                 msg = await chan.fetch_message(info["orders_message"])
-                order_embed, order_view = build_orders_dashboard()
-                await msg.edit(embed=order_embed, view=order_view)
-            except:
+                view = OrderDashboardView()
+                embed = build_clickable_order_dashboard()
+                await msg.edit(embed=embed, view=view)
+            except Exception:
                 pass
 
     # ============================================================
@@ -2416,7 +2419,9 @@ async def weekly_leaderboard():
         )
         embed.set_footer(text=f"Updated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
         await channel.send(embed=embed)
-    users.clear()
+    # Reset weekly totals but keep user entries for war/lifetime stats
+    for uid in list(users.keys()):
+        users[uid] = 0
     save_data(USER_FILE, users)
 
 @tasks.loop(minutes=5)
