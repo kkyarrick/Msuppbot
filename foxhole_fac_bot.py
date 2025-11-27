@@ -903,7 +903,7 @@ class MsuppDashboardModal(discord.ui.Modal, title="Create MSUPP Facility"):
         facility_name = self.facility_name_input.value.strip() or self.facility_name_input.placeholder
         guild_id_str = str(self.guild_id)
         guild = interaction.guild
-        channel = guild.get_channel(self.channel_id)
+        channel = interaction.channel
 
         facility_record = get_facility_record(facility_name)
         fac_tunnels = facility_record["tunnels"]
@@ -993,7 +993,7 @@ async def refresh_msupp_dashboard(guild: discord.Guild, facility_name: str):
         print(f"[INFO] Facility '{facility_name}' missing tunnel_channel/message in guild {guild.name}")
         return
 
-    channel = guild.get_channel(channel_id)
+    channel = guild.get_channel(channel_id) or guild.get_thread(channel_id)
     if not channel:
         print(f"[WARN] Tunnel dashboard channel missing for facility '{facility_name}' in {guild.name}")
         return
@@ -1117,7 +1117,7 @@ async def refresh_order_dashboard(guild: discord.Guild):
         print(f"[INFO] No order dashboard data found for guild {guild.name}.")
         return
 
-    channel = guild.get_channel(channel_id)
+    channel = guild.get_channel(channel_id) or guild.get_thread(channel_id)
     if not channel:
         print(f"[WARN] Orders channel missing for guild {guild.name}.")
         return
@@ -1152,7 +1152,7 @@ async def refresh_orders_loop():
         if not channel_id or not message_id:
             continue  # nothing to refresh yet
 
-        channel = guild.get_channel(channel_id)
+        channel = guild.get_channel(channel_id) or guild.get_thread(channel_id)
         if not channel:
             continue
 
