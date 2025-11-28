@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands, tasks
 from discord.ui import View, Button
 from discord import app_commands
-from datetime import datetime, timezone, time, timedelta
+from datetime import datetime, timezone, time
 import json
 import os
 
@@ -813,45 +813,31 @@ class DashboardPaginator(discord.ui.View):
         start = self.page * self.per_page
         end = start + self.per_page
         subset = self.tunnels[start:end]
-        now = datetime.now(timezone.utc)
-
+        
         for name, data in subset:
             supplies = int(data.get("total_supplies", 0))
             usage = int(data.get("usage_rate", 0))
+            hours = int(supplies / usage) if usage > 0 else 0
+
+            # Status (same logic as original)
+            status = "🟢" if hours >= 24 else "🟡" if hours >= 4 else "🔴"
 
             if usage > 0:
-                hours_float = supplies / usage if supplies > 0 else 0
-                hours = int(hours_float)
-
-                # Status band: 24h+, 4–24h, <4h
-                status_icon = "🟢" if hours >= 24 else "🟡" if hours >= 4 else "🔴"
-
-                # ETA to empty (clamp to a reasonable range)
-                try:
-                    eta_time = (now + timedelta(hours=hours_float))
-                    eta_str = eta_time.strftime("%H:%M UTC")
-                    eta_part = f" | ⏱ ETA: {eta_str}"
-                except Exception:
-                    eta_part = ""
-
                 value = (
-                    f"**Supplies:** {supplies:,} | **Usage:** {usage}/hr | "
-                    f"{status_icon} **{hours}h** remaining{eta_part}"
+                    f"**Supplies:** {supplies:,} | "
+                    f"**Usage:** {usage}/hr | "
+                    f"{status} **{hours}h**"
                 )
             else:
-                # No usage rate: treat as stable
                 value = (
-                    f"**Supplies:** {supplies:,} | **Usage:** 0/hr | ⚪ **Stable**"
+                    f"**Supplies:** {supplies:,} | "
+                    f"**Usage:** 0/hr | ⚪ **Stable**"
                 )
 
-            embed.add_field(
-                name=f"{name}",
-                value=value,
-                inline=False
-            )
+            embed.add_field(name=name, value=value, inline=False)
 
         embed.set_footer(
-            text="Updated every 2 minutes. Colours show remaining hours; ETA is when supplies hit 0 at current usage."
+            text="Updated every 2 minutes. Use the buttons below to add supplies or navigate pages."
         )
         return embed
 
