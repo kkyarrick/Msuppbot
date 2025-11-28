@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands, tasks
 from discord.ui import View, Button
 from discord import app_commands
-from datetime import datetime, timezone, time
+from datetime import datetime, timezone, time, timedelta
 import json
 import os
 
@@ -813,20 +813,45 @@ class DashboardPaginator(discord.ui.View):
         start = self.page * self.per_page
         end = start + self.per_page
         subset = self.tunnels[start:end]
+        now = datetime.now(timezone.utc)
 
         for name, data in subset:
             supplies = int(data.get("total_supplies", 0))
             usage = int(data.get("usage_rate", 0))
-            hours = int(supplies / usage) if usage > 0 else 0
-            status = "🟢" if hours >= 24 else "🟡" if hours >= 4 else "🔴"
+
+            if usage > 0:
+                hours_float = supplies / usage if supplies > 0 else 0
+                hours = int(hours_float)
+
+                # Status band: 24h+, 4–24h, <4h
+                status_icon = "🟢" if hours >= 24 else "🟡" if hours >= 4 else "🔴"
+
+                # ETA to empty (clamp to a reasonable range)
+                try:
+                    eta_time = (now + timedelta(hours=hours_float))
+                    eta_str = eta_time.strftime("%H:%M UTC")
+                    eta_part = f" | ⏱ ETA: {eta_str}"
+                except Exception:
+                    eta_part = ""
+
+                value = (
+                    f"**Supplies:** {supplies:,} | **Usage:** {usage}/hr | "
+                    f"{status_icon} **{hours}h** remaining{eta_part}"
+                )
+            else:
+                # No usage rate: treat as stable
+                value = (
+                    f"**Supplies:** {supplies:,} | **Usage:** 0/hr | ⚪ **Stable**"
+                )
+
             embed.add_field(
                 name=f"{name}",
-                value=f"**Supplies:** {supplies:,} | **Usage:** {usage}/hr | {status} **{hours}h**",
+                value=value,
                 inline=False
             )
 
         embed.set_footer(
-            text="Updated every 2 minutes. Use the buttons below to add supplies or navigate pages."
+            text="Updated every 2 minutes. Colours show remaining hours; ETA is when supplies hit 0 at current usage."
         )
         return embed
 
@@ -2286,13 +2311,20 @@ async def order_delete(interaction: discord.Interaction, order_id: int):
 
 @tasks.loop(minutes=2)
 async def refresh_dashboard_loop():
-    # apply usage decay first (per facility)
-    for facility_data in tunnels.values():
+# apply usage decay first (per facility, tolerant of malformed data)
+    for facility_name, facility_data in tunnels.items():
         tun_dict = facility_data.get("tunnels", {})
+        if not isinstance(tun_dict, dict):
+            continue
+
         for tdata in tun_dict.values():
             rate = tdata.get("usage_rate", 0)
             if rate > 0:
-                tdata["total_supplies"] = max(0, tdata["total_supplies"] - rate / 30)
+                # 2 minutes is 1/30th of an hour → rate/30
+                tdata["total_supplies"] = max(
+                    0,
+                    tdata.get("total_supplies", 0) - (rate / 30)
+                )
 
     save_data(DATA_FILE, tunnels)
 
