@@ -922,6 +922,11 @@ class MsuppDashboardModal(discord.ui.Modal, title="Create MSUPP Facility"):
         }
         info["facilities"] = facilities
         dashboard_info[guild_id_str] = info
+        normalize_facility_record(
+            facility_name,
+            facilities[facility_name],
+            creator_id=interaction.user.id
+        )
         save_data(DASH_FILE, dashboard_info)
 
         await interaction.response.send_message(
@@ -981,6 +986,14 @@ async def refresh_msupp_dashboard(guild: discord.Guild, facility_name: str):
     info = dashboard_info.get(guild_id, {})
     facilities = info.get("facilities", {})
     fac_cfg = facilities.get(facility_name)
+
+    # Update facility metadata
+    fac_cfg["last_refresh"] = datetime.now(timezone.utc).isoformat()
+    save_data(DASH_FILE, dashboard_info)
+
+    # Normalize facility structure before building UI
+    if normalize_facility_record(facility_name, fac_cfg):
+        save_data(DASH_FILE, dashboard_info)
 
     if not fac_cfg:
         print(f"[INFO] No facility '{facility_name}' dashboard info for guild {guild.name}")
