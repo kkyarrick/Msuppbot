@@ -15,7 +15,8 @@ USER_FILE = "users.json"
 DASH_FILE = "dashboard.json"
 ORDERS_FILE = "orders.json"
 CONTRIB_FILE = "contributions.json"
-SUPPLY_INCREMENT = 1500
+SUPPLY_INCREMENT_Dunne = 1500
+SUPPLY_INCREMENT_Stowheel = 6000
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -696,7 +697,7 @@ class StackSubmitModal(discord.ui.Modal, title="Submit Stacks"):
 class TunnelButton(Button):
     def __init__(self, tunnel):
         super().__init__(
-            label=f"{tunnel} +{SUPPLY_INCREMENT}",
+            label=f"{tunnel} + Msupps",
             style=discord.ButtonStyle.green,
             custom_id=f"tunnel_{tunnel.lower().replace(' ', '_')}"
         )
@@ -715,7 +716,7 @@ class TunnelButton(Button):
         async def done_callback(interaction: discord.Interaction):
 
             user_id = str(interaction.user.id)
-            users[user_id] = users.get(user_id, 0) + SUPPLY_INCREMENT
+            users[user_id] = users.get(user_id, 0) + SUPPLY_INCREMENT_Dunne
             guild_id = str(interaction.guild.id)
             channel_id = interaction.channel.id
 
@@ -746,22 +747,22 @@ class TunnelButton(Button):
                 )
                 return
 
-            tdata["total_supplies"] = tdata.get("total_supplies", 0) + SUPPLY_INCREMENT
+            tdata["total_supplies"] = tdata.get("total_supplies", 0) + SUPPLY_INCREMENT_Dunne
             save_data(DATA_FILE, tunnels)
             save_data(USER_FILE, users)
 
-            log_contribution(interaction.user.id, "1500 (Done)", SUPPLY_INCREMENT, self.tunnel)
+            log_contribution(interaction.user.id, "1500 (Done)", SUPPLY_INCREMENT_Dunne, self.tunnel)
             await log_action(
                 interaction.guild,
                 interaction.user,
                 "added supplies",
                 target_name=f"[{facility_name}] {self.tunnel}" if facility_name else self.tunnel,
-                amount=SUPPLY_INCREMENT
+                amount=SUPPLY_INCREMENT_Dunne
             )
 
             await refresh_dashboard(interaction.guild, facility_name)
             await interaction.response.edit_message(
-                content=f"🪣 Added {SUPPLY_INCREMENT} supplies to **{self.tunnel}**!",
+                content=f"🪣 Added {SUPPLY_INCREMENT_Dunne} supplies to **{self.tunnel}**!",
                 view=None
             )
 
