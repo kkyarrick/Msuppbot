@@ -416,7 +416,7 @@ def has_authorized_role(member: discord.Member):
     To switch to Verified™ later, simply replace:
         "Officer" → "Verified™"
     """
-    return any(r.name == "Officer" for r in member.roles)
+    return any(r.name == "Verified™" for r in member.roles)
 
 
 async def interaction_role_guard(interaction: discord.Interaction):
@@ -1489,6 +1489,11 @@ async def on_ready():
 async def addtunnel(interaction: discord.Interaction, name: str, total_supplies: int, usage_rate: int, location: str = "Unknown"):
     await interaction.response.defer(ephemeral=True)
 
+    officer_role = discord.utils.get(interaction.guild.roles, name="Officer")
+    if not officer_role or officer_role not in interaction.user.roles:
+        await interaction.followup.send("🚫 You do not have permission to use this command.", ephemeral=True)
+        return    
+
     guild_id = str(interaction.guild_id)
     channel_id = interaction.channel.id
 
@@ -1621,6 +1626,12 @@ async def updatetunnel(
     location: str = None
 ):
     await interaction.response.defer(ephemeral=True)
+
+    officer_role = discord.utils.get(interaction.guild.roles, name="Officer")
+    if not officer_role or officer_role not in interaction.user.roles:
+        await interaction.followup.send("🚫 You do not have permission to use this command.", ephemeral=True)
+        return
+        
     guild_id = str(interaction.guild_id)
     channel_id = interaction.channel.id
 
@@ -1689,6 +1700,11 @@ async def msupp_dashboard(interaction: discord.Interaction):
     guild_id = str(guild.id)
     channel_id = channel.id
 
+    officer_role = discord.utils.get(interaction.guild.roles, name="Officer")
+    if not officer_role or officer_role not in interaction.user.roles:
+        await interaction.followup.send("🚫 You do not have permission to use this command.", ephemeral=True)
+        return
+
     # If this channel is already bound to a facility, refresh only that one
     existing_facility_name = get_facility_for_channel(guild_id, channel_id)
     if existing_facility_name:
@@ -1707,6 +1723,11 @@ async def msupp_dashboard(interaction: discord.Interaction):
 @bot.tree.command(name="order_dashboard", description="Show or bind the order management dashboard.")
 async def order_dashboard(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
+
+    officer_role = discord.utils.get(interaction.guild.roles, name="Officer")
+    if not officer_role or officer_role not in interaction.user.roles:
+        await interaction.followup.send("🚫 You do not have permission to use this command.", ephemeral=True)
+        return
 
     guild_id = str(interaction.guild_id)
     embed = build_order_dashboard()
@@ -2064,6 +2085,11 @@ async def endwar(interaction: discord.Interaction):
 async def orders(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=False)
 
+    officer_role = discord.utils.get(interaction.guild.roles, name="Officer")
+    if not officer_role or officer_role not in interaction.user.roles:
+        await interaction.followup.send("🚫 You do not have permission to use this command.", ephemeral=True)
+        return
+
     view = OrderDashboardView()
     embed = build_clickable_order_dashboard()
     msg = await interaction.followup.send(embed=embed, view=view)
@@ -2203,6 +2229,13 @@ async def help_command(interaction: discord.Interaction):
     
 @bot.tree.command(name="checkpermissions", description="Check the bot's permissions in this channel.")
 async def checkpermissions(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+
+    officer_role = discord.utils.get(interaction.guild.roles, name="Officer")
+    if not officer_role or officer_role not in interaction.user.roles:
+        await interaction.followup.send("🚫 You do not have permission to use this command.", ephemeral=True)
+        return
+        
     perms = interaction.channel.permissions_for(interaction.guild.me)
     results = [
         f"👁️ View Channel: {'✅' if perms.view_channel else '❌'}",
