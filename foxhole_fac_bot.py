@@ -713,7 +713,7 @@ class TunnelButton(Button):
         if guild_id not in dashboard_info:
             dashboard_info[guild_id] = {}
 
-        async def done_callback(interaction: discord.Interaction):
+        async def dunne_callback(interaction: discord.Interaction):
 
             user_id = str(interaction.user.id)
             users[user_id] = users.get(user_id, 0) + SUPPLY_INCREMENT_Dunne
@@ -766,12 +766,68 @@ class TunnelButton(Button):
                 view=None
             )
 
+        async def Stowheel_callback(interaction: discord.Interaction):
+
+            user_id = str(interaction.user.id)
+            users[user_id] = users.get(user_id, 0) + SUPPLY_INCREMENT_Stowheel
+            guild_id = str(interaction.guild.id)
+            channel_id = interaction.channel.id
+
+            facility_name = get_facility_for_channel(guild_id, channel_id)
+            tdata = None
+
+            if facility_name:
+                fac_rec = get_facility_record(facility_name)
+                tdata = fac_rec["tunnels"].get(self.tunnel)
+                if not tdata:
+                    other_fac, _ = find_tunnel(self.tunnel)
+                    if other_fac:
+                        await interaction.response.edit_message(
+                            content=(
+                                f"❌ Tunnel **{self.tunnel}** belongs to facility "
+                                f"**{other_fac}**. Please use that facility's dashboard thread."
+                            ),
+                            view=None
+                        )
+                        return
+            else:
+                facility_name, tdata = find_tunnel(self.tunnel)
+
+            if not tdata:
+                await interaction.response.edit_message(
+                    content=f"❌ Tunnel **{self.tunnel}** no longer exists.",
+                    view=None
+                )
+                return
+
+            tdata["total_supplies"] = tdata.get("total_supplies", 0) + SUPPLY_INCREMENT_Stowheel
+            save_data(DATA_FILE, tunnels)
+            save_data(USER_FILE, users)
+
+            log_contribution(interaction.user.id, "1500 (Done)", SUPPLY_INCREMENT_Stowheel, self.tunnel)
+            await log_action(
+                interaction.guild,
+                interaction.user,
+                "added supplies",
+                target_name=f"[{facility_name}] {self.tunnel}" if facility_name else self.tunnel,
+                amount=SUPPLY_INCREMENT_Stowheel
+            )
+
+            await refresh_dashboard(interaction.guild, facility_name)
+            await interaction.response.edit_message(
+                content=f"🪣 Added {SUPPLY_INCREMENT_Stowheel} supplies to **{self.tunnel}**!",
+                view=None
+            )
+
+
         async def stack_callback(interaction: discord.Interaction):
             modal = StackSubmitModal(self.tunnel)
             await interaction.response.send_modal(modal)
 
-        view.add_item(discord.ui.Button(label="1500 (Done)", style=discord.ButtonStyle.green))
-        view.children[0].callback = done_callback
+        view.add_item(discord.ui.Button(label="1500 (Dunne)", style=discord.ButtonStyle.green))
+        view.children[0].callback = dunne_callback
+        view.add_item(discord.ui.Button(label="6000 (Stowheel)", style=discord.ButtonStyle.green))
+        view.children[0].callback = Stowheel_callback       
         view.add_item(discord.ui.Button(label="Submit Stacks (x100)", style=discord.ButtonStyle.blurple))
         view.children[1].callback = stack_callback
 
