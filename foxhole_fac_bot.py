@@ -827,9 +827,9 @@ class TunnelButton(Button):
         view.add_item(discord.ui.Button(label="1500 (Dunne)", style=discord.ButtonStyle.green))
         view.children[0].callback = dunne_callback
         view.add_item(discord.ui.Button(label="6000 (Stowheel)", style=discord.ButtonStyle.green))
-        view.children[0].callback = Stowheel_callback       
+        view.children[1].callback = Stowheel_callback       
         view.add_item(discord.ui.Button(label="Submit Stacks (x100)", style=discord.ButtonStyle.blurple))
-        view.children[1].callback = stack_callback
+        view.children[2].callback = stack_callback
 
         await interaction.response.send_message(
             f"How much would you like to submit to **{self.tunnel}**?",
