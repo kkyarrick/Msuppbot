@@ -1948,84 +1948,6 @@ async def endwar(interaction: discord.Interaction):
         await interaction.followup.send("🚫 You do not have permission.", ephemeral=True)
         return
 
-@bot.tree.command(
-    name="adjust_contribution",
-    description="Officer-only: Correct a user's contribution stats."
-)
-@app_commands.describe(
-    member="User whose contribution needs correction",
-    amount="Positive or negative supply amount (e.g. -1500 or 500)",
-    reason="Reason for the correction"
-)
-async def adjust_contribution(
-    interaction: discord.Interaction,
-    member: discord.Member,
-    amount: int,
-    reason: str
-):
-    await interaction.response.defer(ephemeral=True)
-
-    # Officer check (explicit, consistent with other admin commands)
-    officer_role = discord.utils.get(interaction.guild.roles, name="Officer")
-    if not officer_role or officer_role not in interaction.user.roles:
-        await interaction.followup.send(
-            "🚫 Only Officers can adjust contribution data.",
-            ephemeral=True
-        )
-        return
-
-    user_id = str(member.id)
-
-    # Ensure user exists in records
-    if user_id not in users:
-        users[user_id] = 0
-
-    if user_id not in contributions:
-        contributions[user_id] = {
-            "total_supplies": 0,
-            "actions": []
-        }
-
-    # Apply correction
-    before = users[user_id]
-    users[user_id] = max(0, users[user_id] + amount)
-    contributions[user_id]["total_supplies"] = users[user_id]
-
-    # Log correction action
-    now = datetime.now(timezone.utc).isoformat()
-    contributions[user_id]["actions"].append({
-        "timestamp": now,
-        "action": "correction",
-        "amount": amount,
-        "reason": reason,
-        "corrected_by": str(interaction.user.id)
-    })
-
-    # Persist changes
-    save_data(USER_FILE, users)
-    save_data(CONTRIB_FILE, contributions)
-
-    # FAC audit log
-    await log_action(
-        interaction.guild,
-        interaction.user,
-        action="corrected contribution",
-        target_name=member.display_name,
-        details=f"{before:,} → {users[user_id]:,} ({amount:+,}) | {reason}"
-    )
-
-    # Confirmation
-    await interaction.followup.send(
-        (
-            f"✅ Contribution corrected for **{member.display_name}**\n\n"
-            f"**Change:** {amount:+,} supplies\n"
-            f"**New Total:** {users[user_id]:,}\n"
-            f"**Reason:** {reason}"
-        ),
-        ephemeral=True
-    )
-
-
 # ============================================================
 # 1️⃣ ARCHIVE SNAPSHOT BEFORE RESET
 # ============================================================
@@ -2379,6 +2301,84 @@ async def checkpermissions(interaction: discord.Interaction):
         f"⚙️ Slash Commands: {'✅' if perms.use_application_commands else '❌'}",
     ]
     await interaction.response.send_message("\n".join(results), ephemeral=True)
+
+@bot.tree.command(
+    name="adjust_contribution",
+    description="Officer-only: Correct a user's contribution stats."
+)
+@app_commands.describe(
+    member="User whose contribution needs correction",
+    amount="Positive or negative supply amount (e.g. -1500 or 500)",
+    reason="Reason for the correction"
+)
+async def adjust_contribution(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    amount: int,
+    reason: str
+):
+    await interaction.response.defer(ephemeral=True)
+
+    # Officer check (explicit, consistent with other admin commands)
+    officer_role = discord.utils.get(interaction.guild.roles, name="Officer")
+    if not officer_role or officer_role not in interaction.user.roles:
+        await interaction.followup.send(
+            "🚫 Only Officers can adjust contribution data.",
+            ephemeral=True
+        )
+        return
+
+    user_id = str(member.id)
+
+    # Ensure user exists in records
+    if user_id not in users:
+        users[user_id] = 0
+
+    if user_id not in contributions:
+        contributions[user_id] = {
+            "total_supplies": 0,
+            "actions": []
+        }
+
+    # Apply correction
+    before = users[user_id]
+    users[user_id] = max(0, users[user_id] + amount)
+    contributions[user_id]["total_supplies"] = users[user_id]
+
+    # Log correction action
+    now = datetime.now(timezone.utc).isoformat()
+    contributions[user_id]["actions"].append({
+        "timestamp": now,
+        "action": "correction",
+        "amount": amount,
+        "reason": reason,
+        "corrected_by": str(interaction.user.id)
+    })
+
+    # Persist changes
+    save_data(USER_FILE, users)
+    save_data(CONTRIB_FILE, contributions)
+
+    # FAC audit log
+    await log_action(
+        interaction.guild,
+        interaction.user,
+        action="corrected contribution",
+        target_name=member.display_name,
+        details=f"{before:,} → {users[user_id]:,} ({amount:+,}) | {reason}"
+    )
+
+    # Confirmation
+    await interaction.followup.send(
+        (
+            f"✅ Contribution corrected for **{member.display_name}**\n\n"
+            f"**Change:** {amount:+,} supplies\n"
+            f"**New Total:** {users[user_id]:,}\n"
+            f"**Reason:** {reason}"
+        ),
+        ephemeral=True
+    )
+
 
 # ============================================================
 # ORDERS SYSTEM
