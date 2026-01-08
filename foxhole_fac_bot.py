@@ -1948,6 +1948,8 @@ async def endwar(interaction: discord.Interaction):
         await interaction.followup.send("🚫 You do not have permission.", ephemeral=True)
         return
 
+    await interaction.followup.send("DEBUG: reached endwar body", ephemeral=True)
+
 # ============================================================
 # 1️⃣ ARCHIVE SNAPSHOT BEFORE RESET
 # ============================================================
