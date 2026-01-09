@@ -159,6 +159,10 @@ migrate_flat_tunnels_to_facilities()
 # FACILITY / TUNNEL HELPERS
 # ============================================================
 
+def get_facility_by_name(guild: discord.Guild, facility_name: str):
+    gid = str(guild.id)
+    return dashboard_info.get(gid, {}).get("facilities", {}).get(facility_name)
+
 def get_facility_record(facility_name: str) -> dict:
     """
     Ensure the facility exists in `tunnels` and return its record.
@@ -682,6 +686,133 @@ class StackSubmitModal(discord.ui.Modal, title="Submit Stacks"):
             f"🪣 Submitted {amount} supplies ({stacks} stacks) to **{self.tunnel_name}**.",
             ephemeral=True
         )
+
+class BulkTunnelUpdateModal(discord.ui.Modal):
+    def __init__(self, facility_name: str, user: discord.User):
+        super().__init__(title=f"Bulk Tunnel Update — {facility_name}")
+        self.facility_name = facility_name
+        self.user = user
+
+        self.tunnel_names = discord.ui.TextInput(
+            label="Tunnel names (one per line)",
+            placeholder="CT-1\nCT-2\nCT-3",
+            style=discord.TextStyle.paragraph,
+            required=True,
+            max_length=400
+        )
+
+        self.supplies = discord.ui.TextInput(
+            label="Supply value (optional — overrides current)",
+            placeholder="12400",
+            required=False,
+            max_length=10
+        )
+
+        self.usage = discord.ui.TextInput(
+            label="Usage rate per hour (optional)",
+            placeholder="480",
+            required=False,
+            max_length=10
+        )
+
+        self.notes = discord.ui.TextInput(
+            label="Notes (optional)",
+            placeholder="Checked map at 18:40 UTC",
+            required=False,
+            max_length=200
+        )
+
+        self.add_item(self.tunnel_names)
+        self.add_item(self.supplies)
+        self.add_item(self.usage)
+        self.add_item(self.notes)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        now = datetime.now(timezone.utc)
+
+        facility = get_facility_by_name(interaction.guild, self.facility_name)
+        if not facility:
+            await interaction.response.send_message(
+                "❌ Facility not found.",
+                ephemeral=True
+            )
+            return
+
+        tunnels = facility["tunnels"]
+
+        names = [n.strip() for n in self.tunnel_names.value.splitlines() if n.strip()]
+        if len(names) > 20:
+            await interaction.response.send_message(
+                "❌ You can update a maximum of 20 tunnels at once.",
+                ephemeral=True
+            )
+            return
+
+        # Parse optional numeric inputs
+        supplies = None
+        usage = None
+
+        if self.supplies.value:
+            try:
+                supplies = int(self.supplies.value)
+            except ValueError:
+                await interaction.response.send_message(
+                    "❌ Supplies must be a number.",
+                    ephemeral=True
+                )
+                return
+
+        if self.usage.value:
+            try:
+                usage = int(self.usage.value)
+            except ValueError:
+                await interaction.response.send_message(
+                    "❌ Usage rate must be a number.",
+                    ephemeral=True
+                )
+                return
+
+        updated = []
+        skipped = []
+
+        for name in names:
+            if name not in tunnels:
+                skipped.append(name)
+                continue
+
+            tunnel = tunnels[name]
+
+            # Priority: supply override represents observed ground truth
+            if supplies is not None:
+                tunnel["total_supplies"] = supplies
+                tunnel["last_verified_at"] = now.isoformat()
+
+            # Usage update is optional
+            if usage is not None:
+                tunnel["usage_rate"] = usage
+
+            tunnel["last_updated_by"] = str(self.user.id)
+            updated.append(name)
+
+            # Audit log per tunnel (batched naturally by your logger)
+            log_audit(
+                interaction.guild,
+                f"{self.user.display_name} updated tunnel {name}",
+                details=(
+                    f"Supplies={'set to ' + str(supplies) if supplies is not None else 'unchanged'}, "
+                    f"Usage={'set to ' + str(usage) if usage is not None else 'unchanged'}"
+                    + (f", Notes: {self.notes.value}" if self.notes.value else "")
+                )
+            )
+
+        save_data(TUNNEL_FILE, tunnels)
+
+        await interaction.response.send_message(
+            f"✅ Updated: {', '.join(updated) if updated else 'None'}\n"
+            f"⚠️ Skipped (not found): {', '.join(skipped) if skipped else 'None'}",
+            ephemeral=True
+        )
+
 
 # ============================================================
 # DASHBOARD VIEW
@@ -1676,6 +1807,17 @@ async def updatetunnel(
 ):
     await interaction.response.defer(ephemeral=True)
 
+async def updatetunnel(interaction: discord.Interaction):
+    facility = get_facility_for_channel(interaction.channel)
+    if not facility:
+        await interaction.response.send_message(
+            "❌ This command must be used inside an MSUPP facility thread.", ephemeral=True)
+        return
+
+    await interaction.response.send_modal(
+        BulkTunnelUpdateModal(facility_name=facility["facility_name"], user=interaction.user)
+    )
+    
     officer_role = discord.utils.get(interaction.guild.roles, name="Officer")
     if not officer_role or officer_role not in interaction.user.roles:
         await interaction.followup.send("🚫 You do not have permission to use this command.", ephemeral=True)
