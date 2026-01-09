@@ -1798,15 +1798,6 @@ async def addsupplies_name_autocomplete(
     return await tunnel_name_autocomplete_impl(interaction, current)
 
 @bot.tree.command(name="updatetunnel", description="Update tunnel values without affecting leaderboard.")
-async def updatetunnel(
-    interaction: discord.Interaction,
-    name: str,
-    supplies: int = None,
-    usage_rate: int = None,
-    location: str = None
-):
-    await interaction.response.defer(ephemeral=True)
-
 async def updatetunnel(interaction: discord.Interaction):
     facility = get_facility_for_channel(interaction.channel)
     if not facility:
