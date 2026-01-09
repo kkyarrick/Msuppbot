@@ -1799,7 +1799,7 @@ async def addsupplies_name_autocomplete(
 
 @bot.tree.command(name="updatetunnel", description="Update tunnel values without affecting leaderboard.")
 async def updatetunnel(interaction: discord.Interaction):
-    facility_name = get_facility_for_channel(guild_id, channel_id)
+    facility_name = get_facility_for_channel(channel_id)
     if not facility_name:
         await interaction.response.send_message(
             "❌ This command must be used inside an MSUPP facility thread.", ephemeral=True)
