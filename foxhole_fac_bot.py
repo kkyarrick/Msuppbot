@@ -1864,12 +1864,6 @@ async def updatetunnel(interaction: discord.Interaction):
     )
 
     await interaction.followup.send(f"✅ Tunnel **{name}** updated successfully.", ephemeral=True)
-@updatetunnel.autocomplete("name")
-async def updatetunnel_name_autocomplete(
-    interaction: discord.Interaction,
-    current: str
-):
-    return await tunnel_name_autocomplete_impl(interaction, current)
 
 @bot.tree.command(name="msupp_dashboard", description="Create or refresh an MSUPP dashboard for this facility/thread.")
 async def msupp_dashboard(interaction: discord.Interaction):
