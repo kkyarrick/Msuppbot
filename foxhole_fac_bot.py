@@ -2017,7 +2017,7 @@ async def stats(interaction: discord.Interaction):
 async def deletetunnel(interaction: discord.Interaction, name: str):
     await interaction.response.defer(ephemeral=True)
 
-    allowed_roles = discord.utils.get(interaction.guild.roles, name="Officer", "NCO", "Facility Specialist")
+    allowed_roles = discord.utils.get(interaction.guild.roles, name="Officer"), discord.utils.get(interaction.guild.roles, name="NCO"), discord.utils.get(interaction.guild.roles, name="Facility Specialist")
     if not allowed_roles or allowed_roles not in interaction.user.roles:
         await interaction.followup.send("🚫 You do not have permission to use this command.", ephemeral=True)
         return
