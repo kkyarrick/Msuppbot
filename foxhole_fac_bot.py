@@ -409,13 +409,6 @@ def normalize_all_facilities():
 # ============================================================
 
 def has_authorized_role(member: discord.Member):
-    """
-    TEMPORARY GLOBAL LOCK:
-    Restrict ALL bot actions to 'Officer'.
-
-    To switch to Verified™ later, simply replace:
-        "Officer" → "Verified™"
-    """
     return any(r.name == "Verified™" for r in member.roles)
 
 
@@ -1756,8 +1749,8 @@ async def msupp_dashboard(interaction: discord.Interaction):
     guild_id = str(guild.id)
     channel_id = channel.id
 
-    officer_role = discord.utils.get(interaction.guild.roles, name="Officer")
-    if not officer_role or officer_role not in interaction.user.roles:
+    allowed_roles = discord.utils.get(interaction.guild.roles, name="Officer", "NCO", "Facility Specialist")
+    if not allowed_roles or allowed_roles not in interaction.user.roles:
         await interaction.followup.send("🚫 You do not have permission to use this command.", ephemeral=True)
         return
 
@@ -1882,8 +1875,8 @@ async def stats(interaction: discord.Interaction):
 async def deletetunnel(interaction: discord.Interaction, name: str):
     await interaction.response.defer(ephemeral=True)
 
-    officer_role = discord.utils.get(interaction.guild.roles, name="Officer")
-    if not officer_role or officer_role not in interaction.user.roles:
+    allowed_roles = discord.utils.get(interaction.guild.roles, name="Officer", "NCO", "Facility Specialist")
+    if not allowed_roles or allowed_roles not in interaction.user.roles:
         await interaction.followup.send("🚫 You do not have permission to use this command.", ephemeral=True)
         return
 
@@ -2396,8 +2389,9 @@ orders_data = load_orders()
 @bot.tree.command(name="order_create", description="Create a new order request.")
 async def order_create(interaction: discord.Interaction, item: str, quantity: int, priority: str = "Normal", location: str = "Unknown"):
     await interaction.response.defer(ephemeral=True)
-
-    if not has_authorized_role(interaction.user):
+    
+    officer_role = discord.utils.get(interaction.guild.roles, name="Officer")
+    if not officer_role or officer_role not in interaction.user.roles:
         await interaction.followup.send("🚫 You do not have permission to create orders.", ephemeral=True)
         return
 
