@@ -1877,9 +1877,21 @@ async def msupp_dashboard(interaction: discord.Interaction):
     guild_id = str(guild.id)
     channel_id = channel.id
 
-    allowed_roles = discord.utils.get(interaction.guild.roles, name="Officer"), discord.utils.get(interaction.guild.roles, name="NCO"), discord.utils.get(interaction.guild.roles, name="Facility Specialist")
-    if not allowed_roles or allowed_roles not in interaction.user.roles:
-        await interaction.followup.send("🚫 You do not have permission to use this command.", ephemeral=True)
+    member = interaction.guild.get_member(interaction.user.id)
+    if not member:
+        await interaction.followup.send(
+            "🚫 Unable to verify your guild membership.",
+            ephemeral=True
+        )
+        return
+
+    allowed_role_names = {"Officer", "NCO", "Facility Specialist"}
+
+    if not any(role.name in allowed_role_names for role in member.roles):
+        await interaction.followup.send(
+            "🚫 You do not have permission to use this command.",
+            ephemeral=True
+        )
         return
 
     # If this channel is already bound to a facility, refresh only that one
