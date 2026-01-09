@@ -1867,6 +1867,7 @@ async def updatetunnel(interaction: discord.Interaction):
 
 @bot.tree.command(name="msupp_dashboard", description="Create or refresh an MSUPP dashboard for this facility/thread.")
 async def msupp_dashboard(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
     """
     - If this channel/thread already has a facility dashboard: refresh it.
     - Otherwise: open a modal, suggesting the thread name as the facility name.
