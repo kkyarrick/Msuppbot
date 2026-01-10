@@ -728,10 +728,12 @@ class BulkTunnelUpdateModal(discord.ui.Modal):
         self.add_item(self.notes)
 
 async def on_submit(self, interaction: discord.Interaction):
+    from foxhole_fac_bot import tunnels as global_tunnels
+
     now = datetime.now(timezone.utc)
 
-    # Resolve facility directly from global tunnels structure
-    facility = tunnels.get(self.facility_name)
+    # Resolve facility from global tunnels
+    facility = global_tunnels.get(self.facility_name)
     if not facility:
         await interaction.response.send_message(
             "❌ Facility not found.",
@@ -741,7 +743,12 @@ async def on_submit(self, interaction: discord.Interaction):
 
     facility_tunnels = facility.get("tunnels", {})
 
-    names = [n.strip() for n in self.tunnel_names.value.splitlines() if n.strip()]
+    # Parse the names
+    names = [
+        n.strip()
+        for n in self.tunnel_names.value.splitlines()
+        if n.strip()
+    ]
     if len(names) > 20:
         await interaction.response.send_message(
             "❌ You can update a maximum of 20 tunnels at once.",
@@ -749,10 +756,9 @@ async def on_submit(self, interaction: discord.Interaction):
         )
         return
 
-    # Parse optional numeric inputs
+    # Parse numeric fields
     supplies = None
     usage = None
-
     if self.supplies.value:
         try:
             supplies = int(self.supplies.value)
@@ -777,43 +783,38 @@ async def on_submit(self, interaction: discord.Interaction):
     skipped = []
 
     for name in names:
-        tunnel = facility_tunnels.get(name)
-        if not tunnel:
+        tunnel_data = facility_tunnels.get(name)
+        if not tunnel_data:
             skipped.append(name)
             continue
 
-        # Priority: supply override represents observed ground truth
         if supplies is not None:
-            tunnel["total_supplies"] = supplies
-            tunnel["last_verified_at"] = now.isoformat()
-
-        # Usage update is optional
+            tunnel_data["total_supplies"] = supplies
+            tunnel_data["last_verified_at"] = now.isoformat()
         if usage is not None:
-            tunnel["usage_rate"] = usage
+            tunnel_data["usage_rate"] = usage
 
-        tunnel["last_updated_by"] = str(self.user.id)
+        tunnel_data["last_updated_by"] = str(self.user.id)
         updated.append(name)
 
-        # Audit log per tunnel
         log_audit(
             interaction.guild,
             f"{self.user.display_name} updated tunnel {name}",
             details=(
-                f"Supplies={'set to ' + str(supplies) if supplies is not None else 'unchanged'}, "
-                f"Usage={'set to ' + str(usage) if usage is not None else 'unchanged'}"
+                f"Supplies={'set to '+str(supplies) if supplies is not None else 'unchanged'}, "
+                f"Usage={'set to '+str(usage) if usage is not None else 'unchanged'}"
                 + (f", Notes: {self.notes.value}" if self.notes.value else "")
             )
         )
 
-    # ✅ Save the FULL tunnels structure (not a facility slice)
-    save_data(DATA_FILE, tunnels)
+    # Save the full global data
+    save_data(DATA_FILE, global_tunnels)
 
     await interaction.response.send_message(
         f"✅ Updated: {', '.join(updated) if updated else 'None'}\n"
         f"⚠️ Skipped (not found): {', '.join(skipped) if skipped else 'None'}",
         ephemeral=True
     )
-
 
 # ============================================================
 # DASHBOARD VIEW
