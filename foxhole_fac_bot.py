@@ -727,91 +727,92 @@ class BulkTunnelUpdateModal(discord.ui.Modal):
         self.add_item(self.usage)
         self.add_item(self.notes)
 
-    async def on_submit(self, interaction: discord.Interaction):
-        now = datetime.now(timezone.utc)
+async def on_submit(self, interaction: discord.Interaction):
+    now = datetime.now(timezone.utc)
 
-        facility = get_facility_by_name(interaction.guild, self.facility_name)
-        if not facility:
-            await interaction.response.send_message(
-                "❌ Facility not found.",
-                ephemeral=True
-            )
-            return
-
-        tunnels = facility["tunnels"]
-
-        names = [n.strip() for n in self.tunnel_names.value.splitlines() if n.strip()]
-        if len(names) > 20:
-            await interaction.response.send_message(
-                "❌ You can update a maximum of 20 tunnels at once.",
-                ephemeral=True
-            )
-            return
-
-        # Parse optional numeric inputs
-        supplies = None
-        usage = None
-
-        if self.supplies.value:
-            try:
-                supplies = int(self.supplies.value)
-            except ValueError:
-                await interaction.response.send_message(
-                    "❌ Supplies must be a number.",
-                    ephemeral=True
-                )
-                return
-
-        if self.usage.value:
-            try:
-                usage = int(self.usage.value)
-            except ValueError:
-                await interaction.response.send_message(
-                    "❌ Usage rate must be a number.",
-                    ephemeral=True
-                )
-                return
-
-        updated = []
-        skipped = []
-
-        for name in names:
-            if name not in tunnels:
-                skipped.append(name)
-                continue
-
-            tunnel = tunnels[name]
-
-            # Priority: supply override represents observed ground truth
-            if supplies is not None:
-                tunnel["total_supplies"] = supplies
-                tunnel["last_verified_at"] = now.isoformat()
-
-            # Usage update is optional
-            if usage is not None:
-                tunnel["usage_rate"] = usage
-
-            tunnel["last_updated_by"] = str(self.user.id)
-            updated.append(name)
-
-            # Audit log per tunnel (batched naturally by your logger)
-            log_audit(
-                interaction.guild,
-                f"{self.user.display_name} updated tunnel {name}",
-                details=(
-                    f"Supplies={'set to ' + str(supplies) if supplies is not None else 'unchanged'}, "
-                    f"Usage={'set to ' + str(usage) if usage is not None else 'unchanged'}"
-                    + (f", Notes: {self.notes.value}" if self.notes.value else "")
-                )
-            )
-
-        save_data(DATA_FILE, tunnels)
-
+    # Resolve facility directly from global tunnels structure
+    facility = tunnels.get(self.facility_name)
+    if not facility:
         await interaction.response.send_message(
-            f"✅ Updated: {', '.join(updated) if updated else 'None'}\n"
-            f"⚠️ Skipped (not found): {', '.join(skipped) if skipped else 'None'}",
+            "❌ Facility not found.",
             ephemeral=True
         )
+        return
+
+    facility_tunnels = facility.get("tunnels", {})
+
+    names = [n.strip() for n in self.tunnel_names.value.splitlines() if n.strip()]
+    if len(names) > 20:
+        await interaction.response.send_message(
+            "❌ You can update a maximum of 20 tunnels at once.",
+            ephemeral=True
+        )
+        return
+
+    # Parse optional numeric inputs
+    supplies = None
+    usage = None
+
+    if self.supplies.value:
+        try:
+            supplies = int(self.supplies.value)
+        except ValueError:
+            await interaction.response.send_message(
+                "❌ Supplies must be a number.",
+                ephemeral=True
+            )
+            return
+
+    if self.usage.value:
+        try:
+            usage = int(self.usage.value)
+        except ValueError:
+            await interaction.response.send_message(
+                "❌ Usage rate must be a number.",
+                ephemeral=True
+            )
+            return
+
+    updated = []
+    skipped = []
+
+    for name in names:
+        tunnel = facility_tunnels.get(name)
+        if not tunnel:
+            skipped.append(name)
+            continue
+
+        # Priority: supply override represents observed ground truth
+        if supplies is not None:
+            tunnel["total_supplies"] = supplies
+            tunnel["last_verified_at"] = now.isoformat()
+
+        # Usage update is optional
+        if usage is not None:
+            tunnel["usage_rate"] = usage
+
+        tunnel["last_updated_by"] = str(self.user.id)
+        updated.append(name)
+
+        # Audit log per tunnel
+        log_audit(
+            interaction.guild,
+            f"{self.user.display_name} updated tunnel {name}",
+            details=(
+                f"Supplies={'set to ' + str(supplies) if supplies is not None else 'unchanged'}, "
+                f"Usage={'set to ' + str(usage) if usage is not None else 'unchanged'}"
+                + (f", Notes: {self.notes.value}" if self.notes.value else "")
+            )
+        )
+
+    # ✅ Save the FULL tunnels structure (not a facility slice)
+    save_data(DATA_FILE, tunnels)
+
+    await interaction.response.send_message(
+        f"✅ Updated: {', '.join(updated) if updated else 'None'}\n"
+        f"⚠️ Skipped (not found): {', '.join(skipped) if skipped else 'None'}",
+        ephemeral=True
+    )
 
 
 # ============================================================
