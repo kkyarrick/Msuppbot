@@ -1799,74 +1799,34 @@ async def addsupplies_name_autocomplete(
 
 @bot.tree.command(name="updatetunnel", description="Update tunnel values without affecting leaderboard.")
 async def updatetunnel(interaction: discord.Interaction):
+
+    # 1️⃣ Permission check FIRST (before any response)
+    member = interaction.guild.get_member(interaction.user.id)
+    allowed_roles = {"Officer", "NCO", "Facility Specialist"}
+
+    if not member or not any(r.name in allowed_roles for r in member.roles):
+        await interaction.response.send_message(
+            "🚫 You do not have permission to use this command.",
+            ephemeral=True
+        )
+        return
+
+    # 2️⃣ Resolve facility from channel
     guild_id = str(interaction.guild_id)
     channel_id = interaction.channel.id
-    
+
     facility_name = get_facility_for_channel(guild_id, channel_id)
     if not facility_name:
         await interaction.response.send_message(
-            "❌ This command must be used inside an MSUPP facility thread.", ephemeral=True)
+            "❌ This command must be used inside an MSUPP facility thread.",
+            ephemeral=True
+        )
         return
 
+    # 3️⃣ Open modal (FIRST and ONLY interaction response)
     await interaction.response.send_modal(
-        BulkTunnelUpdateModal(facility_name=facility["facility_name"], user=interaction.user)
+        BulkTunnelUpdateModal(facility_name=facility_name, user=interaction.user)
     )
-    
-    officer_role = discord.utils.get(interaction.guild.roles, name="Officer")
-    if not officer_role or officer_role not in interaction.user.roles:
-        await interaction.followup.send("🚫 You do not have permission to use this command.", ephemeral=True)
-        return
-        
-    guild_id = str(interaction.guild_id)
-    channel_id = interaction.channel.id
-
-    facility_from_channel = get_facility_for_channel(guild_id, channel_id)
-    facility_name = facility_from_channel
-    tdata = None
-
-    if facility_from_channel:
-        fac_rec = get_facility_record(facility_from_channel)
-        tdata = fac_rec["tunnels"].get(name)
-        if not tdata:
-            other_fac, _ = find_tunnel(name)
-            if other_fac:
-                await interaction.followup.send(
-                    f"❌ Tunnel **{name}** belongs to facility **{other_fac}**. "
-                    f"Please use that facility's MSUPP dashboard thread.",
-                    ephemeral=True
-                )
-                return
-    else:
-        facility_name, tdata = find_tunnel(name)
-
-    if not tdata:
-        await interaction.followup.send(f"❌ Tunnel **{name}** not found.", ephemeral=True)
-        return
-    
-    # Update only provided fields
-    if supplies is not None:
-        tdata["total_supplies"] = supplies
-    if usage_rate is not None:
-        tdata["usage_rate"] = usage_rate
-    if location is not None:
-        tdata["location"] = location
-
-    total_supplies = tdata.get("total_supplies", 0)
-    current_rate = tdata.get("usage_rate", 0)
-
-    save_data(DATA_FILE, tunnels)
-    await refresh_dashboard(interaction.guild, facility_name)
-
-    await log_action(
-        interaction.guild,
-        interaction.user,
-        "updated tunnel",
-        target_name=f"[{facility_name}] {name}" if facility_name else name,
-        amount=total_supplies,
-        details=f"Rate: {current_rate}/hr"
-    )
-
-    await interaction.followup.send(f"✅ Tunnel **{name}** updated successfully.", ephemeral=True)
 
 @bot.tree.command(name="msupp_dashboard", description="Create or refresh an MSUPP dashboard for this facility/thread.")
 async def msupp_dashboard(interaction: discord.Interaction):
