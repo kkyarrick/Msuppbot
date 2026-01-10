@@ -805,7 +805,7 @@ class BulkTunnelUpdateModal(discord.ui.Modal):
                 )
             )
 
-        save_data(TUNNEL_FILE, tunnels)
+        save_data(DATA_FILE, tunnels)
 
         await interaction.response.send_message(
             f"✅ Updated: {', '.join(updated) if updated else 'None'}\n"
