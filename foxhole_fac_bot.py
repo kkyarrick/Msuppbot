@@ -2017,6 +2017,14 @@ async def stats(interaction: discord.Interaction):
 async def deletetunnel(interaction: discord.Interaction, name: str):
     await interaction.response.defer(ephemeral=True)
 
+    member = interaction.guild.get_member(interaction.user.id)
+    if not member:
+        await interaction.followup.send(
+            "🚫 Unable to verify your guild membership.",
+            ephemeral=True
+        )
+        return
+
     allowed_role_names = {"Officer", "NCO", "Facility Specialist"}
 
     if not any(role.name in allowed_role_names for role in member.roles):
