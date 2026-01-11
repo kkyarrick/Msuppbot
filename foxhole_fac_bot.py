@@ -687,7 +687,7 @@ class StackSubmitModal(discord.ui.Modal, title="Submit Stacks"):
             ephemeral=True
         )
 
-class BulkTunnelLineUpdateModal(discord.ui.Modal):
+class BulkTunnelUpdateModal(discord.ui.Modal):
     def __init__(self, facility_name: str, user: discord.User):
         super().__init__(title=f"Tunnel Updates — {facility_name}")
         self.facility_name = facility_name
