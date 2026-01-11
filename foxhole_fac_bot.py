@@ -772,15 +772,15 @@ class BulkTunnelUpdateModal(discord.ui.Modal):
             tunnel["last_updated_by"] = str(self.user.id)
             updated.append(name)
 
-            log_audit(
+            await log_action(
                 interaction.guild,
-                f"{self.user.display_name} updated tunnel {name}",
+                interaction.user,
+                target_name=f"{self.user.display_name} updated tunnel {name}",
                 details=(
                     f"Supplies set to {supplies}"
                     + (f", Usage set to {usage}/hr" if usage is not None else "")
-                )
             )
-
+        
         save_data(DASH_FILE, dashboard_info)
 
         await interaction.response.send_message(
