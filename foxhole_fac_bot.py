@@ -780,7 +780,6 @@ class BulkTunnelUpdateModal(discord.ui.Modal):
                 details=(
                     f"Supplies={'set to ' + str(supplies) if supplies is not None else 'unchanged'}, "
                     f"Usage={'set to ' + str(usage) if usage is not None else 'unchanged'}"
-                    + (f", Notes: {self.notes.value}" if self.notes.value else "")
                 )
             )
         
