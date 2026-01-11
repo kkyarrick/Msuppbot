@@ -776,7 +776,7 @@ class BulkTunnelUpdateModal(discord.ui.Modal):
                 interaction.guild,
                 interaction.user,
                 target_name=f"{self.user.display_name} updated tunnel {name}",
-                details=(
+                details=
                     f"Supplies set to {supplies}"
                     + (f", Usage set to {usage}/hr" if usage is not None else "")
             )
