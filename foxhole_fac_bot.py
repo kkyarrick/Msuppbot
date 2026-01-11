@@ -687,134 +687,108 @@ class StackSubmitModal(discord.ui.Modal, title="Submit Stacks"):
             ephemeral=True
         )
 
-class BulkTunnelUpdateModal(discord.ui.Modal):
+class BulkTunnelLineUpdateModal(discord.ui.Modal):
     def __init__(self, facility_name: str, user: discord.User):
-        super().__init__(title=f"Bulk Tunnel Update — {facility_name}")
+        super().__init__(title=f"Tunnel Updates — {facility_name}")
         self.facility_name = facility_name
         self.user = user
 
-        self.tunnel_names = discord.ui.TextInput(
-            label="Tunnel names (one per line)",
-            placeholder="CT-1\nCT-2\nCT-3",
+        self.lines = discord.ui.TextInput(
+            label="Tunnel updates (Tunnel | Supplies | Usage optional)",
+            placeholder=(
+                "CT-1 | 12400 | 480\n"
+                "CT-2 | 9800\n"
+                "CT-3 | 15200 | 600"
+            ),
             style=discord.TextStyle.paragraph,
             required=True,
-            max_length=400
+            max_length=1000
         )
 
-        self.supplies = discord.ui.TextInput(
-            label="Supply value (optional — overrides current)",
-            placeholder="12400",
-            required=False,
-            max_length=10
-        )
+        self.add_item(self.lines)
 
-        self.usage = discord.ui.TextInput(
-            label="Usage rate per hour (optional)",
-            placeholder="480",
-            required=False,
-            max_length=10
-        )
+    async def on_submit(self, interaction: discord.Interaction):
+        now = datetime.now(timezone.utc)
 
-        self.notes = discord.ui.TextInput(
-            label="Notes (optional)",
-            placeholder="Checked map at 18:40 UTC",
-            required=False,
-            max_length=200
-        )
-
-        self.add_item(self.tunnel_names)
-        self.add_item(self.supplies)
-        self.add_item(self.usage)
-        self.add_item(self.notes)
-
-async def on_submit(self, interaction: discord.Interaction):
-    from foxhole_fac_bot import tunnels as global_tunnels
-
-    now = datetime.now(timezone.utc)
-
-    # Resolve facility from global tunnels
-    facility = global_tunnels.get(self.facility_name)
-    if not facility:
-        await interaction.response.send_message(
-            "❌ Facility not found.",
-            ephemeral=True
-        )
-        return
-
-    facility_tunnels = facility.get("tunnels", {})
-
-    # Parse the names
-    names = [
-        n.strip()
-        for n in self.tunnel_names.value.splitlines()
-        if n.strip()
-    ]
-    if len(names) > 20:
-        await interaction.response.send_message(
-            "❌ You can update a maximum of 20 tunnels at once.",
-            ephemeral=True
-        )
-        return
-
-    # Parse numeric fields
-    supplies = None
-    usage = None
-    if self.supplies.value:
-        try:
-            supplies = int(self.supplies.value)
-        except ValueError:
+        facility = get_facility_by_name(interaction.guild, self.facility_name)
+        if not facility:
             await interaction.response.send_message(
-                "❌ Supplies must be a number.",
+                "❌ Facility not found.",
                 ephemeral=True
             )
             return
 
-    if self.usage.value:
-        try:
-            usage = int(self.usage.value)
-        except ValueError:
+        tunnels = facility["tunnels"]
+
+        updated = []
+        skipped = []
+        errors = []
+
+        lines = [l.strip() for l in self.lines.value.splitlines() if l.strip()]
+        if len(lines) > 20:
             await interaction.response.send_message(
-                "❌ Usage rate must be a number.",
+                "❌ Maximum 20 tunnel updates at once.",
                 ephemeral=True
             )
             return
 
-    updated = []
-    skipped = []
+        for line in lines:
+            parts = [p.strip() for p in line.split("|")]
 
-    for name in names:
-        tunnel_data = facility_tunnels.get(name)
-        if not tunnel_data:
-            skipped.append(name)
-            continue
+            if len(parts) < 2:
+                errors.append(line)
+                continue
 
-        if supplies is not None:
-            tunnel_data["total_supplies"] = supplies
-            tunnel_data["last_verified_at"] = now.isoformat()
-        if usage is not None:
-            tunnel_data["usage_rate"] = usage
+            name = parts[0]
 
-        tunnel_data["last_updated_by"] = str(self.user.id)
-        updated.append(name)
+            if name not in tunnels:
+                skipped.append(name)
+                continue
 
-        log_audit(
-            interaction.guild,
-            f"{self.user.display_name} updated tunnel {name}",
-            details=(
-                f"Supplies={'set to '+str(supplies) if supplies is not None else 'unchanged'}, "
-                f"Usage={'set to '+str(usage) if usage is not None else 'unchanged'}"
-                + (f", Notes: {self.notes.value}" if self.notes.value else "")
+            try:
+                supplies = int(parts[1])
+            except ValueError:
+                errors.append(line)
+                continue
+
+            usage = None
+            if len(parts) >= 3 and parts[2]:
+                try:
+                    usage = int(parts[2])
+                except ValueError:
+                    errors.append(line)
+                    continue
+
+            tunnel = tunnels[name]
+
+            # Priority: observed supply value
+            tunnel["total_supplies"] = supplies
+            tunnel["last_verified_at"] = now.isoformat()
+
+            if usage is not None:
+                tunnel["usage_rate"] = usage
+
+            tunnel["last_updated_by"] = str(self.user.id)
+            updated.append(name)
+
+            log_audit(
+                interaction.guild,
+                f"{self.user.display_name} updated tunnel {name}",
+                details=(
+                    f"Supplies set to {supplies}"
+                    + (f", Usage set to {usage}/hr" if usage is not None else "")
+                )
             )
+
+        save_data(TUNNEL_FILE, tunnels)
+
+        await interaction.response.send_message(
+            "✅ Update complete\n\n"
+            f"Updated: {', '.join(updated) if updated else 'None'}\n"
+            f"Skipped (not found): {', '.join(skipped) if skipped else 'None'}\n"
+            f"Errors: {len(errors)}",
+            ephemeral=True
         )
-
-    # Save the full global data
-    save_data(DATA_FILE, global_tunnels)
-
-    await interaction.response.send_message(
-        f"✅ Updated: {', '.join(updated) if updated else 'None'}\n"
-        f"⚠️ Skipped (not found): {', '.join(skipped) if skipped else 'None'}",
-        ephemeral=True
-    )
 
 # ============================================================
 # DASHBOARD VIEW
