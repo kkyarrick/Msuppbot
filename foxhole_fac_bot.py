@@ -694,7 +694,7 @@ class BulkTunnelUpdateModal(discord.ui.Modal):
         self.user = user
 
         self.lines = discord.ui.TextInput(
-            label="Tunnel updates (Tunnel | Supplies | Usage optional)",
+            label="Tunnel updates (one per line)",
             placeholder=(
                 "CT-1 | 12400 | 480\n"
                 "CT-2 | 9800\n"
@@ -1177,6 +1177,15 @@ async def refresh_msupp_dashboard(guild: discord.Guild, facility_name: str):
     channel = guild.get_channel(channel_id) or guild.get_thread(channel_id)
     if not channel:
         print(f"[WARN] Tunnel dashboard channel missing for facility '{facility_name}' in {guild.name}")
+
+        # Invalidate stale dashboard references so it can be recreated
+        fac_cfg.pop("tunnel_channel", None)
+        fac_cfg.pop("tunnel_message", None)
+        facilities[facility_name] = fac_cfg
+        info["facilities"] = facilities
+        dashboard_info[guild_id] = info
+        save_data(DASH_FILE, dashboard_info)
+
         return
 
     facility_tunnels = get_facility_tunnels(facility_name)
