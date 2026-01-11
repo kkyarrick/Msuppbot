@@ -774,11 +774,14 @@ class BulkTunnelUpdateModal(discord.ui.Modal):
 
             await log_action(
                 interaction.guild,
-                interaction.user,
-                target_name=f"{self.user.display_name} updated tunnel {name}",
-                details=
-                    f"Supplies set to {supplies}"
-                    + (f", Usage set to {usage}/hr" if usage is not None else "")
+                self.user,
+                action="updated tunnel(s)",
+                target_name=f"[{self.facility_name}] {name}",
+                details=(
+                    f"Supplies={'set to ' + str(supplies) if supplies is not None else 'unchanged'}, "
+                    f"Usage={'set to ' + str(usage) if usage is not None else 'unchanged'}"
+                    + (f", Notes: {self.notes.value}" if self.notes.value else "")
+                )
             )
         
         save_data(DASH_FILE, dashboard_info)
