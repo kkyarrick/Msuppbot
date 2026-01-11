@@ -696,9 +696,10 @@ class BulkTunnelUpdateModal(discord.ui.Modal):
         self.lines = discord.ui.TextInput(
             label="Tunnel updates (one per line)",
             placeholder=(
-                "CT-1 | 12400 | 480\n"
-                "CT-2 | 9800\n"
-                "CT-3 | 15200 | 600"
+                "Tunnel, Supplies, Usage"
+                "CT-1 , 12400 , 480\n"
+                "CT-2 , 9800\n"
+                "CT-3 , 15200 , 600"
             ),
             style=discord.TextStyle.paragraph,
             required=True,
@@ -710,7 +711,7 @@ class BulkTunnelUpdateModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         now = datetime.now(timezone.utc)
 
-        facility = get_facility_by_name(interaction.guild, self.facility_name)
+        facility = get_facility_tunnels(self.facility_name)
         if not facility:
             await interaction.response.send_message(
                 "❌ Facility not found.",
@@ -733,7 +734,7 @@ class BulkTunnelUpdateModal(discord.ui.Modal):
             return
 
         for line in lines:
-            parts = [p.strip() for p in line.split("|")]
+            parts = [p.strip() for p in line.split(",")]
 
             if len(parts) < 2:
                 errors.append(line)
