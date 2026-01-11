@@ -780,7 +780,7 @@ class BulkTunnelUpdateModal(discord.ui.Modal):
                 )
             )
 
-        save_data(TUNNEL_FILE, tunnels)
+        save_data(DASH_FILE, dashboard_info)
 
         await interaction.response.send_message(
             "✅ Update complete\n\n"
