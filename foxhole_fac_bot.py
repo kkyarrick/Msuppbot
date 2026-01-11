@@ -719,7 +719,7 @@ class BulkTunnelUpdateModal(discord.ui.Modal):
             )
             return
 
-        tunnels = get_facility_tunnels(interaction.guild, self.facility_name)
+        tunnels = get_facility_tunnels(self.facility_name)
 
         updated = []
         skipped = []
